@@ -6,6 +6,17 @@ Desktop application for batch transcription of audio and video files using Deepg
 ![Platform](https://img.shields.io/badge/platform-Windows%20|%20macOS%20|%20Linux-blue)
 ![Python](https://img.shields.io/badge/python-3.11+-green)
 
+## Download
+
+### Windows Installer
+
+[![Download](https://img.shields.io/badge/Download-Windows%20Installer-B83A3F?style=for-the-badge&logo=windows)](https://github.com/micple/redscribe/releases/latest/download/Redscribe-Setup-1.0.0.exe)
+
+**[Download Redscribe-Setup-1.0.0.exe](https://github.com/micple/redscribe/releases/latest/download/Redscribe-Setup-1.0.0.exe)** (~107 MB)
+
+> **Free credits:** Deepgram offers **$200 free credits** on signup - that's **~775 hours** of transcription with Nova-2!
+> Get your API key at [console.deepgram.com](https://console.deepgram.com/)
+
 ## Features
 
 - **Batch Processing** - Transcribe multiple audio/video files at once
