@@ -17,7 +17,7 @@ class AboutDialog(ctk.CTkToplevel):
 
         # Window configuration
         self.title(f"About {APP_NAME}")
-        self.geometry("480x380")
+        self.geometry("480x420")
         self.resizable(False, False)
         self.transient(parent)
         self.grab_set()
@@ -25,7 +25,7 @@ class AboutDialog(ctk.CTkToplevel):
         # Center on parent
         self.update_idletasks()
         x = parent.winfo_x() + (parent.winfo_width() - 480) // 2
-        y = parent.winfo_y() + (parent.winfo_height() - 380) // 2
+        y = parent.winfo_y() + (parent.winfo_height() - 420) // 2
         self.geometry(f"+{x}+{y}")
 
         self._create_widgets()
