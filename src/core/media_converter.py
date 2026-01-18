@@ -10,6 +10,7 @@ import shutil
 import uuid
 import os
 import stat
+import sys
 from pathlib import Path
 from typing import Optional, Callable
 
@@ -41,16 +42,53 @@ class MediaConverter:
     """Converts video files to MP3 for transcription."""
 
     def __init__(self):
-        self._check_ffmpeg()
+        self._ffmpeg_path = self._get_ffmpeg_path()
+        self._ffprobe_path = self._get_ffprobe_path()
 
-    def _check_ffmpeg(self) -> None:
-        """Check if FFmpeg is available."""
-        if not shutil.which("ffmpeg"):
-            raise FFmpegNotFoundError(
-                "FFmpeg not found. "
-                "Please install FFmpeg and add it to your PATH.\n"
-                "Download from: https://ffmpeg.org/download.html"
-            )
+    def _get_base_path(self) -> Path:
+        """Get base path for bundled executables."""
+        if getattr(sys, 'frozen', False):
+            # Running as compiled exe (PyInstaller)
+            return Path(sys.executable).parent
+        else:
+            # Running as script - go up from src/core to project root
+            return Path(__file__).parent.parent.parent
+
+    def _get_ffmpeg_path(self) -> str:
+        """Get FFmpeg executable path - bundled first, then system PATH."""
+        base_path = self._get_base_path()
+
+        # Check bundled FFmpeg first
+        bundled_ffmpeg = base_path / "ffmpeg" / "ffmpeg.exe"
+        if bundled_ffmpeg.exists():
+            return str(bundled_ffmpeg)
+
+        # Fallback to system PATH
+        system_ffmpeg = shutil.which("ffmpeg")
+        if system_ffmpeg:
+            return system_ffmpeg
+
+        raise FFmpegNotFoundError(
+            "FFmpeg not found. "
+            "Please reinstall the application or install FFmpeg.\n"
+            "Download from: https://ffmpeg.org/download.html"
+        )
+
+    def _get_ffprobe_path(self) -> str:
+        """Get FFprobe executable path - bundled first, then system PATH."""
+        base_path = self._get_base_path()
+
+        # Check bundled FFprobe first
+        bundled_ffprobe = base_path / "ffmpeg" / "ffprobe.exe"
+        if bundled_ffprobe.exists():
+            return str(bundled_ffprobe)
+
+        # Fallback to system PATH
+        system_ffprobe = shutil.which("ffprobe")
+        if system_ffprobe:
+            return system_ffprobe
+
+        return "ffprobe"  # Last resort - let subprocess handle the error
 
     def _validate_path(self, input_path: Path) -> Path:
         """
@@ -163,7 +201,7 @@ class MediaConverter:
 
         # Build FFmpeg command
         cmd = [
-            "ffmpeg",
+            self._ffmpeg_path,
             "-i", str(input_path),
             "-vn",  # No video
             "-acodec", FFMPEG_AUDIO_CODEC,
@@ -245,7 +283,7 @@ class MediaConverter:
             return None
 
         cmd = [
-            "ffprobe",
+            self._ffprobe_path,
             "-v", "error",
             "-show_entries", "format=duration",
             "-of", "default=noprint_wrappers=1:nokey=1",
@@ -284,7 +322,7 @@ class MediaConverter:
             return False
 
         cmd = [
-            "ffprobe",
+            self._ffprobe_path,
             "-v", "error",
             "-select_streams", "v:0",
             "-show_entries", "stream=codec_type",

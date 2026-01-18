@@ -42,3 +42,8 @@ Thumbs.db
 *.tmp
 *.temp
 nul
+
+# Build artifacts
+ffmpeg/
+installer/
+*.spec
