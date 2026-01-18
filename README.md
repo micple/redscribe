@@ -79,7 +79,7 @@ Click the info button in the bottom-right corner to view:
 ### 1. Clone the repository
 
 ```bash
-git clone https://github.com/yourusername/redscribe.git
+git clone https://github.com/micple/redscribe.git
 cd redscribe
 ```
 

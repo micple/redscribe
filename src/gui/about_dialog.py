@@ -121,5 +121,16 @@ class AboutDialog(ctk.CTkToplevel):
             font=FONTS["small"],
             text_color=COLORS["text_secondary"],
         )
-        author_label.pack(anchor="w", padx=PADDING["medium"], pady=(0, PADDING["medium"]))
+        author_label.pack(anchor="w", padx=PADDING["medium"], pady=(0, PADDING["small"]))
+
+        # GitHub link
+        github_label = ctk.CTkLabel(
+            features_frame,
+            text="github.com/micple/redscribe",
+            font=FONTS["small"],
+            text_color=COLORS["info"],
+            cursor="hand2",
+        )
+        github_label.pack(anchor="w", padx=PADDING["medium"], pady=(0, PADDING["medium"]))
+        github_label.bind("<Button-1>", lambda e: webbrowser.open("https://github.com/micple/redscribe"))
 
