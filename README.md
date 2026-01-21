@@ -14,7 +14,7 @@ Desktop application for batch transcription of audio and video files using Deepg
 
 **[Download Redscribe-Setup-1.0.0.exe](https://github.com/micple/redscribe/releases/latest/download/Redscribe-Setup-1.0.0.exe)** (~107 MB)
 
-> **Free credits:** Deepgram offers **$200 free credits** on signup - that's **~775 hours** of transcription with Nova-2!
+> **Free credits:** Deepgram offers **$200 free credits** on signup - that's **50+ hours** of transcription!
 > Get your API key at [console.deepgram.com](https://console.deepgram.com/)
 
 ## Features
