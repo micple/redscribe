@@ -911,3 +911,54 @@ section {
         grid-template-columns: 1fr;
     }
 }
+
+/* Disclaimer Section */
+.disclaimer-section {
+    padding: 60px 0;
+    background: var(--background);
+    border-top: 1px solid var(--border);
+}
+
+.disclaimer-content {
+    max-width: 700px;
+    margin: 0 auto;
+    text-align: center;
+    padding: 32px;
+    background: var(--surface);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+}
+
+.disclaimer-content h3 {
+    font-size: 1.25rem;
+    font-weight: 600;
+    color: var(--text);
+    margin-bottom: 16px;
+}
+
+.disclaimer-content p {
+    color: var(--text-muted);
+    font-size: 0.95rem;
+    margin-bottom: 20px;
+}
+
+.disclaimer-content ul {
+    list-style: none;
+    text-align: left;
+    display: inline-block;
+}
+
+.disclaimer-content li {
+    color: var(--text-muted);
+    font-size: 0.9rem;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--border);
+}
+
+.disclaimer-content li:last-child {
+    border-bottom: none;
+}
+
+.disclaimer-content li strong {
+    color: var(--text);
+}
