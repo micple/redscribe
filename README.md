@@ -459,6 +459,14 @@ pytest
 
 The project follows PEP 8 guidelines with type hints.
 
+## Disclaimer
+
+This software is provided "as is", without warranty of any kind. Use at your own risk.
+
+- **API costs** - You are responsible for any charges from Deepgram API usage
+- **Content** - The author is not responsible for transcribed content or its accuracy
+- **Data** - Your files are sent to Deepgram's servers for processing
+
 ## License
 
 MIT License - see [LICENSE](LICENSE) file for details.
