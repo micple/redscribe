@@ -55,25 +55,43 @@ class SettingsDialog(ctk.CTkToplevel):
         _set_dialog_icon(self)
 
     def _create_widgets(self):
-        """Create dialog widgets."""
+        """Create dialog widgets.
+
+        Orchestrates widget creation by delegating to focused helper methods,
+        each responsible for one logical section of the settings dialog.
+        """
         # Main frame with more padding
         main_frame = ctk.CTkFrame(self, fg_color=COLORS["surface"], corner_radius=0)
         main_frame.pack(fill="both", expand=True, padx=0, pady=0)
 
-        # Content frame with internal padding
-        content_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
-        content_frame.pack(fill="both", expand=True, padx=SPACING["xl"], pady=SPACING["lg"])
+        # Content frame with internal padding (shared by all sections)
+        self._content_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
+        self._content_frame.pack(fill="both", expand=True, padx=SPACING["xl"], pady=SPACING["lg"])
 
-        # Title
+        self._create_api_key_section()
+        self._create_model_section()
+        self._create_info_section()
+        self._create_status_section()
+        self._create_dialog_buttons()
+
+    def _create_api_key_section(self):
+        """Create the API key entry section.
+
+        Creates:
+            - Title label
+            - API key entry field (password masked)
+            - Show/Hide toggle button
+            - Delete saved key button
+            - Separator line
+        """
         title_label = ctk.CTkLabel(
-            content_frame,
+            self._content_frame,
             text="Deepgram API Key",
             font=FONTS["heading"],
         )
         title_label.pack(pady=(0, SPACING["lg"]))
 
-        # API Key entry frame
-        key_frame = ctk.CTkFrame(content_frame, fg_color="transparent")
+        key_frame = ctk.CTkFrame(self._content_frame, fg_color="transparent")
         key_frame.pack(fill="x", pady=PADDING["small"])
 
         self.key_entry = ctk.CTkEntry(
@@ -98,9 +116,8 @@ class SettingsDialog(ctk.CTkToplevel):
         )
         self.show_key_btn.pack(side="left")
 
-        # Delete key link (left-aligned below key entry)
         self.delete_btn = ctk.CTkButton(
-            content_frame,
+            self._content_frame,
             text="Delete saved key",
             fg_color="transparent",
             hover_color=COLORS["surface_elevated"],
@@ -113,20 +130,26 @@ class SettingsDialog(ctk.CTkToplevel):
         )
         self.delete_btn.pack(anchor="w", pady=(SPACING["xs"], 0))
 
-        # Separator
-        separator = ctk.CTkFrame(content_frame, fg_color=COLORS["border"], height=1)
+        separator = ctk.CTkFrame(self._content_frame, fg_color=COLORS["border"], height=1)
         separator.pack(fill="x", pady=SPACING["md"])
 
-        # Model selection section
+    def _create_model_section(self):
+        """Create the transcription model selection section.
+
+        Creates:
+            - Model section title
+            - Model dropdown (nova-2, whisper, etc.)
+            - Specialization dropdown
+            - Specialization info note
+        """
         model_title = ctk.CTkLabel(
-            content_frame,
+            self._content_frame,
             text="Transcription Model",
             font=FONTS["heading"],
         )
         model_title.pack(anchor="w", pady=(0, SPACING["sm"]))
 
-        # Model dropdown
-        model_frame = ctk.CTkFrame(content_frame, fg_color="transparent")
+        model_frame = ctk.CTkFrame(self._content_frame, fg_color="transparent")
         model_frame.pack(fill="x", pady=PADDING["small"])
 
         model_label = ctk.CTkLabel(
@@ -155,8 +178,7 @@ class SettingsDialog(ctk.CTkToplevel):
         )
         self.model_dropdown.pack(side="left")
 
-        # Specialization dropdown
-        spec_frame = ctk.CTkFrame(content_frame, fg_color="transparent")
+        spec_frame = ctk.CTkFrame(self._content_frame, fg_color="transparent")
         spec_frame.pack(fill="x", pady=PADDING["small"])
 
         spec_label = ctk.CTkLabel(
@@ -184,17 +206,23 @@ class SettingsDialog(ctk.CTkToplevel):
         )
         self.spec_dropdown.pack(side="left")
 
-        # Specialization info note
         spec_info_label = ctk.CTkLabel(
-            content_frame,
+            self._content_frame,
             text="Specializations other than 'General' work only with English",
             font=FONTS["small"],
             text_color=COLORS["text_tertiary"],
         )
         spec_info_label.pack(anchor="w", pady=(SPACING["xs"], 0))
 
-        # Info text with clickable URL
-        info_frame = ctk.CTkFrame(content_frame, fg_color="transparent")
+    def _create_info_section(self):
+        """Create the informational section with API key URL.
+
+        Creates:
+            - Info text directing user to Deepgram console
+            - Clickable URL label
+            - Encryption info note
+        """
+        info_frame = ctk.CTkFrame(self._content_frame, fg_color="transparent")
         info_frame.pack(pady=SPACING["lg"])
 
         info_label1 = ctk.CTkLabel(
@@ -223,16 +251,28 @@ class SettingsDialog(ctk.CTkToplevel):
         )
         info_label2.pack(pady=(SPACING["sm"], 0))
 
-        # Status label
+    def _create_status_section(self):
+        """Create the status message label.
+
+        Creates:
+            - Status label for displaying save/test/error messages
+        """
         self.status_label = ctk.CTkLabel(
-            content_frame,
+            self._content_frame,
             text="",
             font=FONTS["body"],
         )
         self.status_label.pack(pady=SPACING["sm"])
 
-        # Buttons frame
-        buttons_frame = ctk.CTkFrame(content_frame, fg_color="transparent")
+    def _create_dialog_buttons(self):
+        """Create the dialog action buttons.
+
+        Creates:
+            - Test Connection button (left)
+            - Save button (right)
+            - Cancel button (far right)
+        """
+        buttons_frame = ctk.CTkFrame(self._content_frame, fg_color="transparent")
         buttons_frame.pack(fill="x", pady=(SPACING["lg"], 0))
 
         self.test_btn = ctk.CTkButton(

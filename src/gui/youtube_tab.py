@@ -885,7 +885,11 @@ class YouTubeTab(ctk.CTkFrame):
         media_files: List[MediaFile],
         output_dir: Path,
     ):
-        """Process videos: download and transcribe."""
+        """Process videos: download and transcribe.
+
+        Iterates through the video list, downloading and transcribing each one.
+        Delegates per-video work to _download_video and _transcribe_video.
+        """
         output_format = self.format_var.get()
         language = self._get_language_code()
         diarize = self.diarize_var.get()
@@ -897,117 +901,181 @@ class YouTubeTab(ctk.CTkFrame):
 
         for i, (video, media_file) in enumerate(zip(videos, media_files)):
             if self.cancel_requested:
-                for remaining in media_files[i:]:
-                    remaining.status = TranscriptionStatus.SKIPPED
-                    self.after(0, lambda idx=media_files.index(remaining):
-                        self.progress_dialog.update_file_status(idx, TranscriptionStatus.SKIPPED))
+                self._skip_remaining_files(media_files, i)
                 break
 
-            # Update progress
             self.after(0, lambda idx=i, v=video: self.progress_dialog.update_progress(
                 idx, total, f"Downloading: {v.title[:40]}...", ""
             ))
 
-            # Step 1: Download audio
-            media_file.status = TranscriptionStatus.CONVERTING
-            self.after(0, lambda idx=i: self.progress_dialog.update_file_status(
-                idx, TranscriptionStatus.CONVERTING, "Downloading from YouTube..."
-            ))
-
-            result = self.downloader.download_audio(
-                video.url,
-                on_progress=lambda pct, status, idx=i:
-                    self.after(0, lambda p=pct, s=status, i=idx:
-                        self.progress_dialog.update_file_status(
-                            i, TranscriptionStatus.CONVERTING, f"Downloading... {p:.0f}%"
-                        ))
-            )
-
-            if not result.success or not result.path:
-                media_file.status = TranscriptionStatus.FAILED
-                media_file.error_message = result.error or "Download failed"
-                self.session_logger.log_file_failed(video.title, media_file.error_message)
-                self.after(0, lambda idx=i, msg=media_file.error_message:
-                    self.progress_dialog.update_file_status(idx, TranscriptionStatus.FAILED, msg[:50]))
+            # Download audio from YouTube
+            result = self._download_video(video, media_file, i)
+            if result is None:
                 continue
 
-            # Update media file with actual path
-            media_file.path = result.path
-            self.downloaded_files.append(result.path)
-
-            # Step 2: Transcribe
-            media_file.status = TranscriptionStatus.TRANSCRIBING
-            self.session_logger.log_transcribing(video.title)
-            self.after(0, lambda idx=i: self.progress_dialog.update_file_status(
-                idx, TranscriptionStatus.TRANSCRIBING, "Transcribing..."
-            ))
-
-            try:
-                transcription_result = transcription_service.transcribe(
-                    file_path=result.path,
-                    language=language,
-                    diarize=diarize,
-                )
-
-                if not transcription_result.success:
-                    raise Exception(transcription_result.error_message or "Transcription failed")
-
-                # Step 3: Save output
-                self.after(0, lambda idx=i: self.progress_dialog.update_file_status(
-                    idx, TranscriptionStatus.TRANSCRIBING, "Saving..."
-                ))
-
-                # Use video title as output filename
-                output_path = self.output_writer.save(
-                    result=transcription_result,
-                    source_path=result.path,
-                    output_format=output_format,
-                    output_dir=output_dir,
-                )
-
-                media_file.status = TranscriptionStatus.COMPLETED
-                media_file.output_path = output_path
-
-                # Log success
-                duration = transcription_result.duration_seconds or result.duration_seconds or 0
-                self.session_logger.log_file_completed(video.title, duration)
-
-                self.after(0, lambda idx=i: self.progress_dialog.update_file_status(
-                    idx, TranscriptionStatus.COMPLETED, "Done"
-                ))
-
+            # Transcribe the downloaded file
+            success = self._transcribe_downloaded_video(
+                video, media_file, result, i,
+                transcription_service, output_format, output_dir, language, diarize,
+            )
+            if success:
                 success_count += 1
 
-            except Exception as e:
-                media_file.status = TranscriptionStatus.FAILED
-                media_file.error_message = str(e)
-                self.session_logger.log_file_failed(video.title, str(e))
-                self.after(0, lambda idx=i, msg=str(e):
-                    self.progress_dialog.update_file_status(idx, TranscriptionStatus.FAILED, msg[:50]))
-
             # Cleanup downloaded file immediately after processing
-            if result.path and result.path.exists():
-                try:
-                    result.path.unlink()
-                    if result.path in self.downloaded_files:
-                        self.downloaded_files.remove(result.path)
-                except OSError:
-                    pass
+            self._cleanup_downloaded_file(result.path)
 
         # End logging session
         self.session_logger.end_session()
 
-        # Count failures
+        # Finalize progress dialog
         fail_count = sum(1 for f in media_files if f.status == TranscriptionStatus.FAILED)
         failed_files = [f for f in media_files if f.status == TranscriptionStatus.FAILED]
 
-        # Finalize
         if self.cancel_requested:
             self.after(0, self.progress_dialog.set_cancelled)
         else:
             self.after(0, lambda: self.progress_dialog.set_completed_with_retry(
-                success_count, fail_count, failed_files, None  # No retry for YouTube
+                success_count, fail_count, failed_files, None
             ))
+
+    def _skip_remaining_files(self, media_files: List[MediaFile], start_index: int):
+        """Mark all remaining files as skipped when cancellation is requested.
+
+        Args:
+            media_files: List of all media files being processed.
+            start_index: Index from which to start skipping.
+        """
+        for remaining in media_files[start_index:]:
+            remaining.status = TranscriptionStatus.SKIPPED
+            self.after(0, lambda idx=media_files.index(remaining):
+                self.progress_dialog.update_file_status(idx, TranscriptionStatus.SKIPPED))
+
+    def _download_video(
+        self, video: VideoInfo, media_file: MediaFile, index: int
+    ) -> Optional[DownloadResult]:
+        """Download audio from a YouTube video.
+
+        Args:
+            video: Video info with URL and metadata.
+            media_file: MediaFile placeholder for progress tracking.
+            index: Index of the video in the processing list.
+
+        Returns:
+            DownloadResult on success, None on failure.
+        """
+        media_file.status = TranscriptionStatus.CONVERTING
+        self.after(0, lambda idx=index: self.progress_dialog.update_file_status(
+            idx, TranscriptionStatus.CONVERTING, "Downloading from YouTube..."
+        ))
+
+        result = self.downloader.download_audio(
+            video.url,
+            on_progress=lambda pct, status, idx=index:
+                self.after(0, lambda p=pct, s=status, i=idx:
+                    self.progress_dialog.update_file_status(
+                        i, TranscriptionStatus.CONVERTING, f"Downloading... {p:.0f}%"
+                    ))
+        )
+
+        if not result.success or not result.path:
+            media_file.status = TranscriptionStatus.FAILED
+            media_file.error_message = result.error or "Download failed"
+            self.session_logger.log_file_failed(video.title, media_file.error_message)
+            self.after(0, lambda idx=index, msg=media_file.error_message:
+                self.progress_dialog.update_file_status(idx, TranscriptionStatus.FAILED, msg[:50]))
+            return None
+
+        media_file.path = result.path
+        self.downloaded_files.append(result.path)
+        return result
+
+    def _transcribe_downloaded_video(
+        self,
+        video: VideoInfo,
+        media_file: MediaFile,
+        result: DownloadResult,
+        index: int,
+        transcription_service: TranscriptionService,
+        output_format: str,
+        output_dir: Path,
+        language: str,
+        diarize: bool,
+    ) -> bool:
+        """Transcribe a downloaded video file and save the output.
+
+        Args:
+            video: Video info with metadata.
+            media_file: MediaFile for status tracking.
+            result: Download result containing the file path.
+            index: Index for progress dialog updates.
+            transcription_service: Service for sending audio to Deepgram.
+            output_format: Desired output format (txt, srt, vtt).
+            output_dir: Directory to save transcription output.
+            language: Language code for transcription.
+            diarize: Whether to enable speaker diarization.
+
+        Returns:
+            True on success, False on failure.
+        """
+        media_file.status = TranscriptionStatus.TRANSCRIBING
+        self.session_logger.log_transcribing(video.title)
+        self.after(0, lambda idx=index: self.progress_dialog.update_file_status(
+            idx, TranscriptionStatus.TRANSCRIBING, "Transcribing..."
+        ))
+
+        try:
+            transcription_result = transcription_service.transcribe(
+                file_path=result.path,
+                language=language,
+                diarize=diarize,
+            )
+
+            if not transcription_result.success:
+                raise Exception(transcription_result.error_message or "Transcription failed")
+
+            self.after(0, lambda idx=index: self.progress_dialog.update_file_status(
+                idx, TranscriptionStatus.TRANSCRIBING, "Saving..."
+            ))
+
+            output_path = self.output_writer.save(
+                result=transcription_result,
+                source_path=result.path,
+                output_format=output_format,
+                output_dir=output_dir,
+            )
+
+            media_file.status = TranscriptionStatus.COMPLETED
+            media_file.output_path = output_path
+
+            duration = transcription_result.duration_seconds or result.duration_seconds or 0
+            self.session_logger.log_file_completed(video.title, duration)
+
+            self.after(0, lambda idx=index: self.progress_dialog.update_file_status(
+                idx, TranscriptionStatus.COMPLETED, "Done"
+            ))
+            return True
+
+        except Exception as e:
+            media_file.status = TranscriptionStatus.FAILED
+            media_file.error_message = str(e)
+            self.session_logger.log_file_failed(video.title, str(e))
+            self.after(0, lambda idx=index, msg=str(e):
+                self.progress_dialog.update_file_status(idx, TranscriptionStatus.FAILED, msg[:50]))
+            return False
+
+    def _cleanup_downloaded_file(self, file_path: Optional[Path]):
+        """Remove a downloaded temporary file after processing.
+
+        Args:
+            file_path: Path to the downloaded file to clean up.
+        """
+        if file_path and file_path.exists():
+            try:
+                file_path.unlink()
+                if file_path in self.downloaded_files:
+                    self.downloaded_files.remove(file_path)
+            except OSError:
+                pass
 
     def _start_channel_transcription(self):
         """Start transcription for channel content (playlists + loose videos)."""

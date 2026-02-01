@@ -7,7 +7,10 @@ Handles:
 - All-time statistics persistence
 - Cost calculation
 """
+import logging
 import json
+
+_module_logger = logging.getLogger(__name__)
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -108,6 +111,7 @@ class SessionLogger:
     }
 
     def __init__(self):
+        """Initialize the session logger and load persisted stats and events."""
         self.current_session: Optional[SessionStats] = None
         # App session - cumulative stats from app start to close (not persisted)
         self.app_session: SessionStats = SessionStats(
@@ -124,7 +128,7 @@ class SessionLogger:
         self._load_stats()
         self._load_events()
 
-    def _load_stats(self):
+    def _load_stats(self) -> None:
         """Load statistics from file."""
         try:
             if STATS_FILE.exists():
@@ -135,7 +139,7 @@ class SessionLogger:
         except (json.JSONDecodeError, KeyError, TypeError):
             pass  # Start fresh if file is corrupted
 
-    def _save_stats(self):
+    def _save_stats(self) -> None:
         """Save statistics to file."""
         try:
             LOGS_DIR.mkdir(parents=True, exist_ok=True)
@@ -147,7 +151,7 @@ class SessionLogger:
         except OSError:
             pass  # Ignore save errors
 
-    def _load_events(self):
+    def _load_events(self) -> None:
         """Load events from file."""
         try:
             if EVENTS_FILE.exists():
@@ -157,7 +161,7 @@ class SessionLogger:
         except (json.JSONDecodeError, KeyError, TypeError):
             self.events = []
 
-    def _save_events(self):
+    def _save_events(self) -> None:
         """Save events to file."""
         try:
             LOGS_DIR.mkdir(parents=True, exist_ok=True)
@@ -168,7 +172,7 @@ class SessionLogger:
             pass
 
     def _add_event(self, level: LogLevel, message: str,
-                   file_name: Optional[str] = None, details: Optional[str] = None):
+                   file_name: Optional[str] = None, details: Optional[str] = None) -> None:
         """Add a log entry."""
         entry = LogEntry(
             timestamp=datetime.now().strftime("%H:%M:%S"),
@@ -184,24 +188,31 @@ class SessionLogger:
         if self.on_event:
             self.on_event(entry)
 
-    def _notify_stats_update(self):
+    def _notify_stats_update(self) -> None:
         """Notify UI of stats change."""
         if self.on_stats_update:
             self.on_stats_update()
 
-    def set_model(self, model: str):
+    def set_model(self, model: str) -> None:
         """Set the transcription model for cost calculation."""
         self.model = model
 
     def calculate_cost(self, duration_seconds: float) -> float:
-        """Calculate cost based on duration and model."""
+        """Calculate transcription cost based on audio duration and selected model.
+
+        Args:
+            duration_seconds: Audio duration in seconds.
+
+        Returns:
+            Estimated cost in USD.
+        """
         rate = self.PRICING.get(self.model, self.PRICING["nova-2"])
         minutes = duration_seconds / 60
         return round(minutes * rate, 4)
 
     # === Session Management ===
 
-    def start_session(self):
+    def start_session(self) -> None:
         """Start a new transcription session."""
         now = datetime.now().isoformat()
         self.current_session = SessionStats(
@@ -217,7 +228,7 @@ class SessionLogger:
         self._add_event(LogLevel.INFO, "Started transcription session")
         self._notify_stats_update()
 
-    def end_session(self):
+    def end_session(self) -> None:
         """End the current session and persist stats."""
         if not self.current_session:
             return
@@ -253,32 +264,37 @@ class SessionLogger:
 
     # === Logging Methods ===
 
-    def log_info(self, message: str, file_name: Optional[str] = None):
+    def log_info(self, message: str, file_name: Optional[str] = None) -> None:
         """Log an info message."""
         self._add_event(LogLevel.INFO, message, file_name)
 
-    def log_success(self, message: str, file_name: Optional[str] = None):
+    def log_success(self, message: str, file_name: Optional[str] = None) -> None:
         """Log a success message."""
         self._add_event(LogLevel.SUCCESS, message, file_name)
 
-    def log_warning(self, message: str, file_name: Optional[str] = None):
+    def log_warning(self, message: str, file_name: Optional[str] = None) -> None:
         """Log a warning message."""
         self._add_event(LogLevel.WARNING, message, file_name)
 
-    def log_error(self, message: str, file_name: Optional[str] = None, details: Optional[str] = None):
+    def log_error(self, message: str, file_name: Optional[str] = None, details: Optional[str] = None) -> None:
         """Log an error message."""
         self._add_event(LogLevel.ERROR, message, file_name, details)
 
-    def log_converting(self, file_name: str):
+    def log_converting(self, file_name: str) -> None:
         """Log file conversion start."""
         self._add_event(LogLevel.CONVERTING, f"Converting to MP3", file_name)
 
-    def log_transcribing(self, file_name: str):
+    def log_transcribing(self, file_name: str) -> None:
         """Log transcription start."""
         self._add_event(LogLevel.TRANSCRIBING, f"Transcribing", file_name)
 
-    def log_file_completed(self, file_name: str, duration_seconds: float = 0):
-        """Log successful file completion."""
+    def log_file_completed(self, file_name: str, duration_seconds: float = 0) -> None:
+        """Log successful file completion and update session statistics.
+
+        Args:
+            file_name: Name of the completed file.
+            duration_seconds: Audio duration in seconds (for cost calculation).
+        """
         cost = self.calculate_cost(duration_seconds)
 
         if self.current_session:
@@ -295,8 +311,13 @@ class SessionLogger:
         )
         self._notify_stats_update()
 
-    def log_file_failed(self, file_name: str, error: str):
-        """Log file failure."""
+    def log_file_failed(self, file_name: str, error: str) -> None:
+        """Log file failure and update session statistics.
+
+        Args:
+            file_name: Name of the failed file.
+            error: Error message describing the failure.
+        """
         if self.current_session:
             self.current_session.files_count += 1
             self.current_session.failed += 1
@@ -304,7 +325,7 @@ class SessionLogger:
         self._add_event(LogLevel.ERROR, f"Failed: {error[:50]}", file_name)
         self._notify_stats_update()
 
-    def log_retry(self, file_name: str, attempt: int):
+    def log_retry(self, file_name: str, attempt: int) -> None:
         """Log retry attempt."""
         self._add_event(LogLevel.WARNING, f"Retrying (attempt {attempt})", file_name)
 
@@ -329,13 +350,13 @@ class SessionLogger:
             return f"{hours}h {minutes}min"
         return f"{minutes}min"
 
-    def clear_events(self):
+    def clear_events(self) -> None:
         """Clear all logged events."""
         self.events = []
         self._save_events()
         self._notify_stats_update()
 
-    def reset_stats(self):
+    def reset_stats(self) -> None:
         """Reset all statistics."""
         self.all_time = AllTimeStats()
         self.current_session = None
@@ -357,7 +378,14 @@ class SessionLogger:
         return round(self.all_time.total_cost_usd / hours, 2)
 
     def export_stats_csv(self, path: Path) -> bool:
-        """Export statistics to CSV file."""
+        """Export all-time statistics to a CSV file.
+
+        Args:
+            path: Destination file path for the CSV export.
+
+        Returns:
+            True if export succeeded, False on I/O error.
+        """
         try:
             with open(path, "w", encoding="utf-8") as f:
                 f.write("Metric,Value\n")

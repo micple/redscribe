@@ -1,6 +1,7 @@
 """
 Main application window.
 """
+import logging
 import customtkinter as ctk
 from tkinter import filedialog, messagebox
 from pathlib import Path
@@ -8,6 +9,8 @@ import threading
 import os
 import time
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 try:
     from PIL import Image, ImageDraw, ImageFont
@@ -24,6 +27,7 @@ from config import (
     OUTPUT_FORMATS,
     TEMP_DIR,
     YOUTUBE_TEMP_DIR,
+    ICON_SIZES,
 )
 from src.utils.api_manager import APIManager
 from src.utils.temp_file_manager import TempFileManager
@@ -98,19 +102,19 @@ class MainWindow(ctk.CTk):
             try:
                 self._create_icon(icon_path)
             except Exception as e:
-                print(f"Could not create icon: {e}")
+                logger.warning("Could not create icon: %s", e)
                 return
 
         # Set the icon
         try:
             self.iconbitmap(str(icon_path))
         except Exception as e:
-            print(f"Could not set icon: {e}")
+            logger.warning("Could not set icon: %s", e)
 
     def _create_icon(self, icon_path: Path):
         """Create a red R icon file."""
         # Create a simple red icon with white R
-        sizes = [(16, 16), (32, 32), (48, 48), (256, 256)]
+        sizes = ICON_SIZES
         images = []
 
         for size in sizes:
@@ -157,26 +161,53 @@ class MainWindow(ctk.CTk):
             self._open_settings()
 
     def _create_widgets(self):
-        """Create main window widgets using grid layout."""
-        # Configure grid
+        """Create main window widgets using grid layout.
+
+        Orchestrates widget creation by delegating to focused helper methods,
+        each responsible for one logical section of the UI.
+        """
+        self._setup_layout()
+        self._create_top_bar()
+        self._create_tab_frames()
+        self._create_directory_section()
+        self._create_files_section()
+        self._create_options_section()
+        self._create_output_section()
+        self._create_action_buttons()
+        self._create_youtube_tab()
+        self._create_logs_tab()
+
+    def _setup_layout(self):
+        """Configure the root grid layout and main containers.
+
+        Creates the top-level grid configuration and the tab_container
+        and content_container frames that hold all other widgets.
+        """
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(0, weight=1)
-
-        # Main container with premium dark background
         self.configure(fg_color=COLORS["background"])
 
-        # Tab view container
-        tab_container = ctk.CTkFrame(self, fg_color=COLORS["background"])
-        tab_container.grid(row=0, column=0, sticky="nsew", padx=SPACING["lg"], pady=SPACING["lg"])
-        tab_container.grid_columnconfigure(0, weight=1)
-        tab_container.grid_rowconfigure(1, weight=1)
+        self._tab_container = ctk.CTkFrame(self, fg_color=COLORS["background"])
+        self._tab_container.grid(row=0, column=0, sticky="nsew", padx=SPACING["lg"], pady=SPACING["lg"])
+        self._tab_container.grid_columnconfigure(0, weight=1)
+        self._tab_container.grid_rowconfigure(1, weight=1)
 
-        # ===== Top Bar: Tabs on left + Credits on right =====
-        top_bar = ctk.CTkFrame(tab_container, fg_color="transparent")
+        self._content_container = ctk.CTkFrame(self._tab_container, fg_color=COLORS["background"])
+        self._content_container.grid(row=1, column=0, sticky="nsew")
+        self._content_container.grid_columnconfigure(0, weight=1)
+        self._content_container.grid_rowconfigure(0, weight=1)
+
+    def _create_top_bar(self):
+        """Create the top bar with tab selector and credits display.
+
+        Creates:
+            - Tab selector segmented button (Main, YouTube, Logs)
+            - Credits display frame with label and help icon
+        """
+        top_bar = ctk.CTkFrame(self._tab_container, fg_color="transparent")
         top_bar.grid(row=0, column=0, sticky="ew", pady=(0, PADDING["small"]))
         top_bar.grid_columnconfigure(1, weight=1)
 
-        # Tab selector (segmented button)
         self.tab_selector = ctk.CTkSegmentedButton(
             top_bar,
             values=["Main", "YouTube", "Logs"],
@@ -192,7 +223,6 @@ class MainWindow(ctk.CTk):
         self.tab_selector.set("Main")
         self.tab_selector.grid(row=0, column=0, sticky="w")
 
-        # Credits display
         self.credits_frame = ctk.CTkFrame(top_bar, fg_color=COLORS["surface_elevated"], corner_radius=6)
         self.credits_frame.grid(row=0, column=2, sticky="e")
 
@@ -205,7 +235,6 @@ class MainWindow(ctk.CTk):
         )
         self.credits_label.pack(side="left")
 
-        # Help icon for credits (hidden by default)
         self.credits_help_btn = ctk.CTkLabel(
             self.credits_frame,
             text="(?)",
@@ -217,39 +246,35 @@ class MainWindow(ctk.CTk):
         )
         self.credits_tooltip = None
 
-        # ===== Content Container =====
-        content_container = ctk.CTkFrame(tab_container, fg_color=COLORS["background"])
-        content_container.grid(row=1, column=0, sticky="nsew")
-        content_container.grid_columnconfigure(0, weight=1)
-        content_container.grid_rowconfigure(0, weight=1)
+    def _create_tab_frames(self):
+        """Create the main, YouTube, and logs tab frames.
 
-        # Main tab frame
-        self.main_tab_frame = ctk.CTkFrame(content_container, fg_color=COLORS["background"])
+        Sets up the three content frames that are shown/hidden
+        when the user switches tabs via the segmented button.
+        """
+        self.main_tab_frame = ctk.CTkFrame(self._content_container, fg_color=COLORS["background"])
         self.main_tab_frame.grid(row=0, column=0, sticky="nsew")
 
-        # YouTube tab frame
-        self.youtube_tab_frame = ctk.CTkFrame(content_container, fg_color=COLORS["background"])
+        self.youtube_tab_frame = ctk.CTkFrame(self._content_container, fg_color=COLORS["background"])
         self.youtube_tab_frame.grid(row=0, column=0, sticky="nsew")
-        self.youtube_tab_frame.grid_remove()  # Hidden by default
+        self.youtube_tab_frame.grid_remove()
 
-        # Logs tab frame
-        self.logs_tab_frame = ctk.CTkFrame(content_container, fg_color=COLORS["background"])
+        self.logs_tab_frame = ctk.CTkFrame(self._content_container, fg_color=COLORS["background"])
         self.logs_tab_frame.grid(row=0, column=0, sticky="nsew")
-        self.logs_tab_frame.grid_remove()  # Hidden by default
+        self.logs_tab_frame.grid_remove()
 
-        # Aliases for the content setup
-        main_tab = self.main_tab_frame
-        logs_tab_frame = self.logs_tab_frame
+        self.main_tab_frame.grid_columnconfigure(0, weight=1)
+        self.main_tab_frame.grid_rowconfigure(2, weight=1)
 
-        # Configure main tab
-        main_tab.grid_columnconfigure(0, weight=1)
-        main_tab.grid_rowconfigure(2, weight=1)
+    def _create_directory_section(self):
+        """Create the directory selection section.
 
-        # ===== Main Tab Content =====
-        main_container = main_tab  # Use main_tab as the container
-
-        # ===== Directory Selection Section =====
-        dir_frame = ctk.CTkFrame(main_container, fg_color=COLORS["surface"], corner_radius=DIMENSIONS["corner_radius_lg"], border_width=1, border_color=COLORS["border"])
+        Creates:
+            - Directory entry field (readonly)
+            - Browse button for directory selection
+            - Recursive subdirectory checkbox
+        """
+        dir_frame = ctk.CTkFrame(self.main_tab_frame, fg_color=COLORS["surface"], corner_radius=DIMENSIONS["corner_radius_lg"], border_width=1, border_color=COLORS["border"])
         dir_frame.grid(row=0, column=0, sticky="ew", pady=(0, SPACING["base"]))
         dir_frame.grid_columnconfigure(1, weight=1)
 
@@ -274,7 +299,6 @@ class MainWindow(ctk.CTk):
         )
         self.browse_btn.grid(row=0, column=2, padx=(0, PADDING["medium"]), pady=PADDING["medium"])
 
-        # Recursive checkbox
         self.recursive_var = ctk.BooleanVar(value=False)
         self.recursive_check = ctk.CTkCheckBox(
             dir_frame,
@@ -287,8 +311,14 @@ class MainWindow(ctk.CTk):
         )
         self.recursive_check.grid(row=1, column=0, columnspan=3, padx=PADDING["medium"], pady=(0, PADDING["small"]), sticky="w")
 
-        # ===== Files Selection Section =====
-        files_frame = ctk.CTkFrame(main_container, fg_color=COLORS["surface"], corner_radius=DIMENSIONS["corner_radius_lg"], border_width=1, border_color=COLORS["border"])
+    def _create_files_section(self):
+        """Create the file selection section.
+
+        Creates:
+            - Files summary label showing selection count
+            - Select Files button to open file browser dialog
+        """
+        files_frame = ctk.CTkFrame(self.main_tab_frame, fg_color=COLORS["surface"], corner_radius=DIMENSIONS["corner_radius_lg"], border_width=1, border_color=COLORS["border"])
         files_frame.grid(row=1, column=0, sticky="ew", pady=(0, SPACING["base"]))
         files_frame.grid_columnconfigure(1, weight=1)
 
@@ -319,8 +349,16 @@ class MainWindow(ctk.CTk):
         )
         self.select_files_btn.grid(row=0, column=2, padx=(0, PADDING["medium"]), pady=PADDING["medium"])
 
-        # ===== Options Section =====
-        options_frame = ctk.CTkFrame(main_container, fg_color=COLORS["surface"], corner_radius=DIMENSIONS["corner_radius_lg"], border_width=1, border_color=COLORS["border"])
+    def _create_options_section(self):
+        """Create the transcription options section.
+
+        Creates:
+            - Output format radio buttons (left column)
+            - Speaker diarization checkbox (left column)
+            - Language dropdown (right column)
+            - Language info label (right column)
+        """
+        options_frame = ctk.CTkFrame(self.main_tab_frame, fg_color=COLORS["surface"], corner_radius=DIMENSIONS["corner_radius_lg"], border_width=1, border_color=COLORS["border"])
         options_frame.grid(row=2, column=0, sticky="ew", pady=(0, SPACING["base"]))
         options_frame.grid_columnconfigure(0, weight=1)
         options_frame.grid_columnconfigure(1, weight=1)
@@ -348,7 +386,6 @@ class MainWindow(ctk.CTk):
             )
             rb.pack(side="left", padx=(0, PADDING["medium"]))
 
-        # Diarization checkbox
         self.diarize_var = ctk.BooleanVar(value=False)
         self.diarize_check = ctk.CTkCheckBox(
             left_col,
@@ -392,15 +429,22 @@ class MainWindow(ctk.CTk):
         )
         lang_info_label.pack(anchor="w", pady=(SPACING["xs"], 0))
 
-        # ===== Output Location Section =====
-        output_frame = ctk.CTkFrame(main_container, fg_color=COLORS["surface"], corner_radius=DIMENSIONS["corner_radius_lg"], border_width=1, border_color=COLORS["border"])
+    def _create_output_section(self):
+        """Create the output location section.
+
+        Creates:
+            - Output location label
+            - Radio buttons for source-relative or custom output
+            - Output directory entry field
+            - Browse button for output directory
+        """
+        output_frame = ctk.CTkFrame(self.main_tab_frame, fg_color=COLORS["surface"], corner_radius=DIMENSIONS["corner_radius_lg"], border_width=1, border_color=COLORS["border"])
         output_frame.grid(row=3, column=0, sticky="ew", pady=(0, SPACING["base"]))
         output_frame.grid_columnconfigure(2, weight=1)
 
         output_label = ctk.CTkLabel(output_frame, text="Output location:", font=FONTS["body"])
         output_label.grid(row=0, column=0, columnspan=4, padx=PADDING["medium"], pady=(PADDING["medium"], PADDING["small"]), sticky="w")
 
-        # Radio buttons for output location
         self.output_location_var = ctk.StringVar(value="source")
 
         source_radio = ctk.CTkRadioButton(
@@ -451,8 +495,15 @@ class MainWindow(ctk.CTk):
         )
         self.output_browse_btn.grid(row=2, column=3, padx=(0, PADDING["medium"]), pady=(0, PADDING["medium"]))
 
-        # ===== Action Buttons =====
-        action_frame = ctk.CTkFrame(main_container, fg_color="transparent")
+    def _create_action_buttons(self):
+        """Create the bottom action buttons row.
+
+        Creates:
+            - Settings button (left)
+            - Start Transcription button (right)
+            - About info button (far right)
+        """
+        action_frame = ctk.CTkFrame(self.main_tab_frame, fg_color="transparent")
         action_frame.grid(row=4, column=0, sticky="ew")
         action_frame.grid_columnconfigure(1, weight=1)
 
@@ -483,7 +534,6 @@ class MainWindow(ctk.CTk):
         )
         self.start_btn.grid(row=0, column=2, sticky="e")
 
-        # About button (info icon)
         self.about_btn = ctk.CTkButton(
             action_frame,
             text="\u2139",
@@ -497,7 +547,11 @@ class MainWindow(ctk.CTk):
         )
         self.about_btn.grid(row=0, column=3, sticky="e", padx=(SPACING["sm"], 0))
 
-        # ===== YouTube Tab Content =====
+    def _create_youtube_tab(self):
+        """Create the YouTube tab content.
+
+        Initializes the YouTubeTab widget inside the youtube_tab_frame.
+        """
         self.youtube_tab_frame.grid_columnconfigure(0, weight=1)
         self.youtube_tab_frame.grid_rowconfigure(0, weight=1)
 
@@ -509,11 +563,15 @@ class MainWindow(ctk.CTk):
         )
         self.youtube_tab.grid(row=0, column=0, sticky="nsew")
 
-        # ===== Logs Tab Content =====
-        logs_tab_frame.grid_columnconfigure(0, weight=1)
-        logs_tab_frame.grid_rowconfigure(0, weight=1)
+    def _create_logs_tab(self):
+        """Create the Logs tab content.
 
-        self.logs_tab = LogsTab(logs_tab_frame)
+        Initializes the LogsTab widget inside the logs_tab_frame.
+        """
+        self.logs_tab_frame.grid_columnconfigure(0, weight=1)
+        self.logs_tab_frame.grid_rowconfigure(0, weight=1)
+
+        self.logs_tab = LogsTab(self.logs_tab_frame)
         self.logs_tab.grid(row=0, column=0, sticky="nsew")
 
     def _show_about_dialog(self):
@@ -564,7 +622,7 @@ class MainWindow(ctk.CTk):
             tooltip_text = "No API key configured.\nGo to Settings to add your Deepgram API key."
         elif "error" in balance:
             error_msg = balance.get("error", "Unknown error")
-            print(f"Credits error: {error_msg}")
+            logger.warning("Credits error: %s", error_msg)
 
             if "403" in str(error_msg):
                 self.credits_label.configure(text="Credits: N/A")

@@ -469,17 +469,95 @@ Error "API rate limit exceeded" - Too many requests sent. Wait a moment and try 
 The app automatically renames output files if they already exist:
 - `interview.txt` → `interview_1.txt` → `interview_2.txt`
 
+## Architecture
+
+Redscribe follows a clean architecture pattern separating business logic from the GUI layer.
+
+### Core Components
+
+**TranscriptionOrchestrator** (`src/core/transcription_orchestrator.py`)
+- Orchestrates the file transcription pipeline without GUI dependencies
+- Coordinates: video conversion, Deepgram API transcription, and output file saving
+- Emits events (`converting`, `transcribing`, `saving`, `completed`, `failed`) via an observer callback so callers (GUI or CLI) can react
+- Fully testable with mocked dependencies
+
+**TempFileManager** (`src/utils/temp_file_manager.py`)
+- Centralized temporary file management replacing duplicate cleanup methods
+- Tracks files, supports pattern-based cleanup, and enforces security checks
+- Refuses to delete files outside the designated temp directory (path traversal prevention)
+- Thread-safe via `threading.Lock`
+
+**TranscriptionService** (`src/core/transcription.py`)
+- Handles Deepgram API communication (file upload, response parsing)
+- Split into focused single-responsibility methods: `_validate_inputs`, `_build_request_params`, `_make_request`, `_check_response_errors`, `_parse_response`
+
+**MediaConverter** (`src/core/media_converter.py`)
+- FFmpeg wrapper for video-to-audio conversion with configurable timeout
+- Integrates with TempFileManager for automatic converted file cleanup
+
+**ErrorClassifier** (`src/core/error_classifier.py`)
+- Classifies transcription errors into retryable (network, rate limit, server) and non-retryable (auth, file, conversion, config) categories
+- Provides exponential backoff delay calculation for retry logic
+
+### GUI Layer
+- CustomTkinter-based desktop interface
+- Separated from business logic via event callbacks from the orchestrator
+- Mega-methods split to manageable sizes for maintainability
+
+### Testing
+- 70+ unit tests with pytest
+- Coverage reporting for core and utils modules
+- Comprehensive mocking of external services (Deepgram API, FFmpeg)
+
 ## Development
+
+### Development Setup
+
+1. Create and activate a virtual environment:
+   ```bash
+   python -m venv venv
+   source venv/bin/activate  # On Windows: venv\Scripts\activate
+   ```
+
+2. Install dependencies:
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+3. Run the application:
+   ```bash
+   python main.py
+   ```
 
 ### Running Tests
 
+Run all unit tests:
 ```bash
 pytest
 ```
 
+Run with coverage report:
+```bash
+pytest --cov=src --cov-report=html
+```
+
+View coverage report by opening `htmlcov/index.html` in a browser.
+
 ### Code Style
 
 The project follows PEP 8 guidelines with type hints.
+
+### Dependencies
+
+| Package | Min Version | Purpose |
+|---------|-------------|---------|
+| customtkinter | 5.2.2 | Modern GUI framework |
+| Pillow | 11.0.0 | Image processing (icons) |
+| httpx | 0.28.0 | HTTP client for Deepgram API |
+| cryptography | 43.0.0 | API key encryption |
+| yt-dlp | 2024.0.0 | YouTube audio extraction |
+| pytest | 8.0.0 | Unit testing framework |
+| pytest-cov | 4.1.0 | Coverage reporting |
 
 ## Disclaimer
 

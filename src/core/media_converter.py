@@ -5,7 +5,10 @@ Security features:
 - Path traversal validation
 - Secure temporary file handling
 """
+import logging
 import subprocess
+
+logger = logging.getLogger(__name__)
 import shutil
 import uuid
 import os
@@ -44,6 +47,15 @@ class MediaConverter:
     """Converts video files to MP3 for transcription."""
 
     def __init__(self):
+        """
+        Initialize the media converter.
+
+        Locates FFmpeg and FFprobe executables (bundled or system PATH)
+        and creates a TempFileManager for converted file cleanup.
+
+        Raises:
+            FFmpegNotFoundError: If FFmpeg cannot be found.
+        """
         self._ffmpeg_path = self._get_ffmpeg_path()
         self._ffprobe_path = self._get_ffprobe_path()
         self.temp_manager = TempFileManager(TEMP_DIR)

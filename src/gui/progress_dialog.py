@@ -1,7 +1,10 @@
 """
 Progress dialog for transcription process.
 """
+import logging
 import customtkinter as ctk
+
+logger = logging.getLogger(__name__)
 import os
 import subprocess
 import sys
@@ -59,20 +62,35 @@ class ProgressDialog(ctk.CTkToplevel):
         _set_dialog_icon(self)
 
     def _create_widgets(self):
-        """Create dialog widgets."""
-        main_frame = ctk.CTkFrame(self)
-        main_frame.pack(fill="both", expand=True, padx=PADDING["large"], pady=PADDING["large"])
+        """Create dialog widgets.
 
-        # Title
+        Orchestrates widget creation by delegating to focused helper methods,
+        each responsible for one logical section of the progress dialog.
+        """
+        self._main_frame = ctk.CTkFrame(self)
+        self._main_frame.pack(fill="both", expand=True, padx=PADDING["large"], pady=PADDING["large"])
+
+        self._create_overall_progress()
+        self._create_file_list()
+        self._create_control_buttons()
+
+    def _create_overall_progress(self):
+        """Create the overall progress section.
+
+        Creates:
+            - Title label
+            - Current file info frame with file name and size
+            - Progress bar and percentage text
+            - Status and warning labels
+        """
         self.title_label = ctk.CTkLabel(
-            main_frame,
+            self._main_frame,
             text="Transcription in Progress...",
             font=FONTS["heading"],
         )
         self.title_label.pack(pady=(0, PADDING["medium"]))
 
-        # Current file info frame
-        info_frame = ctk.CTkFrame(main_frame, fg_color=COLORS["surface"], corner_radius=8)
+        info_frame = ctk.CTkFrame(self._main_frame, fg_color=COLORS["surface"], corner_radius=8)
         info_frame.pack(fill="x", pady=PADDING["small"])
 
         self.current_file_label = ctk.CTkLabel(
@@ -90,9 +108,8 @@ class ProgressDialog(ctk.CTkToplevel):
         )
         self.file_size_label.pack(pady=(0, PADDING["small"]))
 
-        # Progress bar
         self.progress_bar = ctk.CTkProgressBar(
-            main_frame,
+            self._main_frame,
             width=550,
             height=20,
             progress_color=COLORS["primary"],
@@ -100,34 +117,38 @@ class ProgressDialog(ctk.CTkToplevel):
         self.progress_bar.pack(pady=PADDING["medium"])
         self.progress_bar.set(0)
 
-        # Progress text
         self.progress_text = ctk.CTkLabel(
-            main_frame,
+            self._main_frame,
             text="0%",
             font=FONTS["body"],
         )
         self.progress_text.pack()
 
-        # Status label with detailed info
         self.status_label = ctk.CTkLabel(
-            main_frame,
+            self._main_frame,
             text="",
             font=FONTS["small"],
             text_color=COLORS["text_secondary"],
         )
         self.status_label.pack(pady=PADDING["small"])
 
-        # Warning label
         self.warning_label = ctk.CTkLabel(
-            main_frame,
+            self._main_frame,
             text="Do not close the window - this will cancel the transcription process",
             font=FONTS["small"],
             text_color=COLORS["warning"],
         )
         self.warning_label.pack(pady=(0, PADDING["small"]))
 
-        # File list frame (no expand to leave room for buttons)
-        list_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
+    def _create_file_list(self):
+        """Create the scrollable file progress list.
+
+        Creates:
+            - File Progress label
+            - Scrollable frame with per-file status rows
+            - Each row has: status icon, file name, status detail label
+        """
+        list_frame = ctk.CTkFrame(self._main_frame, fg_color="transparent")
         list_frame.pack(fill="x", pady=PADDING["medium"])
 
         list_label = ctk.CTkLabel(
@@ -138,7 +159,6 @@ class ProgressDialog(ctk.CTkToplevel):
         )
         list_label.pack(fill="x")
 
-        # Scrollable file status list
         self.file_list = ctk.CTkScrollableFrame(
             list_frame,
             fg_color=COLORS["surface"],
@@ -147,7 +167,6 @@ class ProgressDialog(ctk.CTkToplevel):
         )
         self.file_list.pack(fill="x", pady=(PADDING["small"], 0))
 
-        # Create file status items
         self.file_status_labels = []
         for file in self.files:
             item_frame = ctk.CTkFrame(self.file_list, fg_color="transparent")
@@ -186,11 +205,18 @@ class ProgressDialog(ctk.CTkToplevel):
                 "status": detail_label,
             })
 
-        # Buttons frame
-        self.buttons_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
+    def _create_control_buttons(self):
+        """Create the dialog control buttons.
+
+        Creates:
+            - Open Folder button (hidden initially, shown after completion)
+            - Cancel button (visible during processing)
+            - Close button (hidden initially, shown after completion)
+            - Retry button placeholder (created dynamically when needed)
+        """
+        self.buttons_frame = ctk.CTkFrame(self._main_frame, fg_color="transparent")
         self.buttons_frame.pack(fill="x", pady=(PADDING["medium"], 0))
 
-        # Retry button (hidden initially)
         self.retry_btn = None
 
         self.open_folder_btn = ctk.CTkButton(
@@ -468,7 +494,7 @@ class ProgressDialog(ctk.CTkToplevel):
                 else:
                     subprocess.run(["xdg-open", str(folder_to_open)])
             except Exception as e:
-                print(f"Could not open folder: {e}")
+                logger.warning("Could not open folder: %s", e)
 
     def _on_cancel_click(self):
         """Handle cancel button click."""

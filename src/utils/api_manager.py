@@ -20,9 +20,9 @@ from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 import base64
-from typing import Optional
+from typing import Any, Dict, Optional, Tuple
 
-from config import CONFIG_FILE, API_TIMEOUT, DEEPGRAM_DEFAULT_MODEL, DEEPGRAM_DEFAULT_SPECIALIZATION
+from config import CONFIG_FILE, API_TIMEOUT, DEEPGRAM_DEFAULT_MODEL, DEEPGRAM_DEFAULT_SPECIALIZATION, PBKDF2_ITERATIONS
 
 # Salt length in bytes (256 bits)
 SALT_LENGTH = 32
@@ -32,6 +32,7 @@ class APIManager:
     """Manages Deepgram API key storage and validation."""
 
     def __init__(self):
+        """Initialize the API manager with lazy Fernet encryption setup."""
         self._fernet = None  # Lazy initialization
 
     def _get_machine_id(self) -> str:
@@ -89,7 +90,7 @@ class APIManager:
             algorithm=hashes.SHA256(),
             length=32,
             salt=salt,
-            iterations=100000,
+            iterations=PBKDF2_ITERATIONS,
         )
         key = base64.urlsafe_b64encode(kdf.derive(machine_id.encode()))
         return Fernet(key)
@@ -100,7 +101,7 @@ class APIManager:
             self._fernet = self._create_fernet()
         return self._fernet
 
-    def _load_config_raw(self) -> dict:
+    def _load_config_raw(self) -> Dict[str, Any]:
         """Load raw configuration from file (without triggering Fernet init)."""
         if not CONFIG_FILE.exists():
             return {}
@@ -110,7 +111,7 @@ class APIManager:
         except (json.JSONDecodeError, IOError):
             return {}
 
-    def _save_config_raw(self, config: dict) -> None:
+    def _save_config_raw(self, config: Dict[str, Any]) -> None:
         """Save configuration to file with restricted permissions."""
         CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
 
@@ -143,24 +144,32 @@ class APIManager:
             # Don't fail if permissions can't be set - log would be better
             pass
 
-    def _load_config(self) -> dict:
+    def _load_config(self) -> Dict[str, Any]:
         """Load configuration from file."""
         return self._load_config_raw()
 
-    def _save_config(self, config: dict) -> None:
+    def _save_config(self, config: Dict[str, Any]) -> None:
         """Save configuration to file."""
         self._save_config_raw(config)
 
     def save_api_key(self, api_key: str) -> None:
-        """Encrypt and save API key."""
+        """Encrypt and save API key to the config file.
+
+        Args:
+            api_key: The Deepgram API key to store.
+        """
         fernet = self._get_fernet()
         encrypted = fernet.encrypt(api_key.encode()).decode()
         config = self._load_config()
         config["api_key"] = encrypted
         self._save_config(config)
 
-    def load_api_key(self) -> str | None:
-        """Load and decrypt API key."""
+    def load_api_key(self) -> Optional[str]:
+        """Load and decrypt the stored API key.
+
+        Returns:
+            The decrypted API key, or None if not stored or decryption fails.
+        """
         config = self._load_config()
         encrypted = config.get("api_key")
         if not encrypted:
@@ -181,7 +190,7 @@ class APIManager:
         config.pop("api_key", None)
         self._save_config(config)
 
-    def validate_api_key(self, api_key: str) -> tuple[bool, str]:
+    def validate_api_key(self, api_key: str) -> Tuple[bool, str]:
         """
         Validate API key by making a test request to Deepgram.
 
@@ -209,7 +218,7 @@ class APIManager:
         except httpx.RequestError as e:
             return False, f"Connection error: {str(e)}"
 
-    def get_balance(self) -> Optional[dict]:
+    def get_balance(self) -> Optional[Dict[str, Any]]:
         """
         Get the account balance from Deepgram API.
 
@@ -276,13 +285,26 @@ class APIManager:
         except Exception as e:
             return {"error": str(e)}
 
-    def get_preference(self, key: str, default=None):
-        """Get a user preference."""
+    def get_preference(self, key: str, default: Any = None) -> Any:
+        """Get a user preference from the config file.
+
+        Args:
+            key: Preference key name.
+            default: Value returned if the key is not found.
+
+        Returns:
+            The stored preference value, or default.
+        """
         config = self._load_config()
         return config.get("preferences", {}).get(key, default)
 
-    def set_preference(self, key: str, value) -> None:
-        """Set a user preference."""
+    def set_preference(self, key: str, value: Any) -> None:
+        """Set a user preference and persist to the config file.
+
+        Args:
+            key: Preference key name.
+            value: Value to store.
+        """
         config = self._load_config()
         if "preferences" not in config:
             config["preferences"] = {}

@@ -59,6 +59,20 @@ if PROJECT_ROOT not in sys.path:
 
 def main():
     """Main entry point."""
+    # Configure logging
+    import logging
+    from config import LOGS_DIR
+
+    LOGS_DIR.mkdir(parents=True, exist_ok=True)
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        handlers=[
+            logging.FileHandler(LOGS_DIR / 'redscribe.log'),
+            logging.StreamHandler(),  # Console output
+        ]
+    )
+
     try:
         from src.gui.main_window import MainWindow
 

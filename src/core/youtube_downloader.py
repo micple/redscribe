@@ -3,7 +3,10 @@ YouTube audio downloader using yt-dlp.
 
 Downloads audio from YouTube videos, playlists, and channels as MP3.
 """
+import logging
 import re
+
+logger = logging.getLogger(__name__)
 import uuid
 from pathlib import Path
 from dataclasses import dataclass
@@ -478,7 +481,7 @@ class YouTubeDownloader:
         )
 
     @staticmethod
-    def format_duration(seconds) -> str:
+    def format_duration(seconds: Optional[int]) -> str:
         """Format duration in seconds to human-readable string."""
         if seconds is None or seconds <= 0:
             return "?"

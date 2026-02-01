@@ -1,8 +1,11 @@
 """
 File system scanner for media files.
 """
+import logging
 from pathlib import Path
-from typing import Optional
+from typing import Dict, List, Optional, Set, Union
+
+logger = logging.getLogger(__name__)
 
 from config import ALL_MEDIA_EXTENSIONS
 from src.models.media_file import MediaFile, DirectoryNode
@@ -11,7 +14,7 @@ from src.models.media_file import MediaFile, DirectoryNode
 class FileScanner:
     """Scans directories for audio and video files."""
 
-    def __init__(self, extensions: set[str] | None = None):
+    def __init__(self, extensions: Optional[Set[str]] = None):
         """
         Initialize scanner.
 
@@ -29,7 +32,7 @@ class FileScanner:
         self,
         directory: Path,
         recursive: bool = False,
-        _visited: Optional[set] = None,
+        _visited: Optional[Set[Path]] = None,
     ) -> DirectoryNode:
         """
         Scan a directory for media files.
@@ -66,7 +69,7 @@ class FileScanner:
 
         return self._scan_node(directory, recursive, _visited)
 
-    def _scan_node(self, directory: Path, recursive: bool, _visited: Optional[set] = None) -> DirectoryNode:
+    def _scan_node(self, directory: Path, recursive: bool, _visited: Optional[Set[Path]] = None) -> DirectoryNode:
         """Recursively scan a directory node."""
         node = DirectoryNode(
             path=directory,
@@ -103,7 +106,7 @@ class FileScanner:
         self,
         directory: Path,
         recursive: bool = False,
-    ) -> list[MediaFile]:
+    ) -> List[MediaFile]:
         """
         Scan directory and return flat list of media files.
 
@@ -128,7 +131,7 @@ class FileScanner:
 
         return sorted(files, key=lambda f: f.path)
 
-    def get_directory_stats(self, node: DirectoryNode) -> dict:
+    def get_directory_stats(self, node: DirectoryNode) -> Dict[str, Union[int, float]]:
         """
         Get statistics about scanned directory.
 

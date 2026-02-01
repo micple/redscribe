@@ -3,7 +3,10 @@ Error classification for retry logic.
 
 Classifies transcription errors to determine if they should be retried.
 """
+import logging
 from typing import Tuple
+
+logger = logging.getLogger(__name__)
 
 from src.models.media_file import ErrorCategory
 

@@ -5,15 +5,15 @@ Security features:
 - File streaming to reduce memory usage for large files
 - Chunked upload support
 """
+import logging
 import httpx
+
+logger = logging.getLogger(__name__)
 from pathlib import Path
 from typing import Optional, Callable, Iterator
 from dataclasses import dataclass
 
-from config import DEEPGRAM_DEFAULT_MODEL, DEEPGRAM_MAX_FILE_SIZE, API_TIMEOUT
-
-# Chunk size for streaming uploads (64KB)
-UPLOAD_CHUNK_SIZE = 64 * 1024
+from config import DEEPGRAM_DEFAULT_MODEL, DEEPGRAM_MAX_FILE_SIZE, API_TIMEOUT, UPLOAD_CHUNK_SIZE
 
 
 DEEPGRAM_API_URL = "https://api.deepgram.com/v1/listen"
@@ -41,6 +41,13 @@ class TranscriptionService:
     """Service for transcribing audio files using Deepgram API."""
 
     def __init__(self, api_key: str, model: str = None):
+        """
+        Initialize the transcription service.
+
+        Args:
+            api_key: Deepgram API key for authentication.
+            model: Deepgram model name (e.g. "nova-2"). Defaults to config value.
+        """
         self.api_key = api_key
         self.model = model or DEEPGRAM_DEFAULT_MODEL
 

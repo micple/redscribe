@@ -101,3 +101,13 @@ FFMPEG_CONVERSION_TIMEOUT = 600  # seconds (10 minutes)
 # GUI settings
 WINDOW_MIN_WIDTH = 800
 WINDOW_MIN_HEIGHT = 600
+ICON_SIZES = [(16, 16), (32, 32), (48, 48), (256, 256)]
+
+# FFmpeg error log settings
+FFMPEG_ERROR_LOG_MAX_LINES = 100
+
+# API upload settings
+UPLOAD_CHUNK_SIZE = 64 * 1024  # 64KB chunks
+
+# Security settings
+PBKDF2_ITERATIONS = 600000  # OWASP 2023 recommendation

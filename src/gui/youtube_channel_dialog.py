@@ -3,7 +3,10 @@ YouTube channel selection dialog.
 
 Allows users to select playlists and/or individual videos from a channel.
 """
+import logging
 import customtkinter as ctk
+
+logger = logging.getLogger(__name__)
 from typing import Optional, Callable, List
 from pathlib import Path
 
@@ -508,7 +511,7 @@ class YouTubeChannelDialog(ctk.CTkToplevel):
             except Exception as e:
                 # Show error and reset expand button
                 self.after(0, lambda: playlist_item.expand_btn.configure(text="❌"))
-                print(f"Error loading playlist: {e}")
+                logger.error("Error loading playlist: %s", e)
 
         # Run in background thread
         thread = threading.Thread(target=load_videos, daemon=True)

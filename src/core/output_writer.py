@@ -1,7 +1,10 @@
 """
 Output writer for transcription results in various formats.
 """
+import logging
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 from typing import Optional
 
 from src.core.transcription import TranscriptionResult
