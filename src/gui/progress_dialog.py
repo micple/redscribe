@@ -187,11 +187,14 @@ class ProgressDialog(ctk.CTkToplevel):
             })
 
         # Buttons frame
-        buttons_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
-        buttons_frame.pack(fill="x", pady=(PADDING["medium"], 0))
+        self.buttons_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
+        self.buttons_frame.pack(fill="x", pady=(PADDING["medium"], 0))
+
+        # Retry button (hidden initially)
+        self.retry_btn = None
 
         self.open_folder_btn = ctk.CTkButton(
-            buttons_frame,
+            self.buttons_frame,
             text="\U0001F4C2 Open Folder",
             width=130,
             fg_color=COLORS["success"],
@@ -201,7 +204,7 @@ class ProgressDialog(ctk.CTkToplevel):
         # Hidden initially, shown after completion
 
         self.cancel_btn = ctk.CTkButton(
-            buttons_frame,
+            self.buttons_frame,
             text="Cancel",
             width=100,
             fg_color=COLORS["error"],
@@ -211,7 +214,7 @@ class ProgressDialog(ctk.CTkToplevel):
         self.cancel_btn.pack(side="right")
 
         self.close_btn = ctk.CTkButton(
-            buttons_frame,
+            self.buttons_frame,
             text="Close",
             width=100,
             fg_color=COLORS["primary"],
@@ -263,6 +266,10 @@ class ProgressDialog(ctk.CTkToplevel):
             icon = ICONS["cross"]
             color = COLORS["error"]
             text = message or "Failed"
+        elif status == TranscriptionStatus.RETRYING:
+            icon = "\u21BB"  # Rotating arrow
+            color = COLORS["warning"]
+            text = message or "Retrying..."
         elif status == TranscriptionStatus.SKIPPED:
             icon = "\u2014"  # Em dash
             color = COLORS["warning"]
@@ -329,6 +336,111 @@ class ProgressDialog(ctk.CTkToplevel):
         self.status_label.configure(text=message, text_color=COLORS["error"])
         self.cancel_btn.pack_forget()
         self.close_btn.pack(side="right")
+
+    def update_status(self, message: str):
+        """Update the status label with a message."""
+        self.status_label.configure(text=message)
+
+    def set_completed_with_retry(
+        self,
+        success_count: int,
+        fail_count: int,
+        failed_files: list,
+        on_retry: Callable = None
+    ):
+        """Mark process as completed with option to retry failed files."""
+        self.process_state = ProcessState.COMPLETED
+        self.progress_bar.set(1)
+        self.progress_text.configure(text="100%")
+
+        # Change warning to "safe to close" message
+        self.warning_label.configure(
+            text="You can now safely close this window",
+            text_color=COLORS["success"],
+        )
+
+        if fail_count == 0:
+            self.title_label.configure(
+                text=f"Transcription Complete! ({success_count} files)"
+            )
+            self.status_label.configure(
+                text="All files processed successfully",
+                text_color=COLORS["success"],
+            )
+        else:
+            self.title_label.configure(
+                text=f"Transcription Complete ({success_count} success, {fail_count} failed)"
+            )
+
+            # Build failure summary
+            if len(failed_files) == 1:
+                summary = f"Failed: {failed_files[0].name}"
+            elif len(failed_files) <= 3:
+                names = ", ".join(f.name for f in failed_files)
+                summary = f"Failed: {names}"
+            else:
+                summary = f"{fail_count} files could not be processed"
+
+            self.status_label.configure(
+                text=summary,
+                text_color=COLORS["warning"],
+            )
+
+        # Hide cancel button
+        self.cancel_btn.pack_forget()
+
+        # Remove old retry button if exists
+        if self.retry_btn:
+            self.retry_btn.pack_forget()
+            self.retry_btn = None
+
+        # Show retry button if there are failed files that can be retried
+        if failed_files and on_retry:
+            self.retry_btn = ctk.CTkButton(
+                self.buttons_frame,
+                text="\u21BB Retry Failed",
+                width=120,
+                fg_color=COLORS["warning"],
+                text_color="#FFFFFF",
+                command=on_retry,
+            )
+            self.retry_btn.pack(side="left", padx=(0, PADDING["small"]))
+
+        # Ensure open folder and close buttons are visible
+        self.open_folder_btn.pack_forget()
+        self.close_btn.pack_forget()
+        self.open_folder_btn.pack(side="left")
+        self.close_btn.pack(side="right")
+
+    def prepare_for_retry(self, files_to_retry: list):
+        """Prepare dialog for retry operation."""
+        self.process_state = ProcessState.RUNNING
+
+        # Update title
+        self.title_label.configure(text=f"Retrying {len(files_to_retry)} file(s)...")
+
+        # Update warning
+        self.warning_label.configure(
+            text="Do not close the window - retry in progress",
+            text_color=COLORS["warning"],
+        )
+
+        # Hide completion buttons, show cancel
+        if self.retry_btn:
+            self.retry_btn.pack_forget()
+        self.open_folder_btn.pack_forget()
+        self.close_btn.pack_forget()
+        self.cancel_btn.configure(state="normal", text="Cancel")
+        self.cancel_btn.pack(side="right")
+
+        # Reset progress bar
+        self.progress_bar.set(0)
+        self.progress_text.configure(text="0%")
+
+        # Update file statuses to pending for retry files
+        for file in files_to_retry:
+            index = self.files.index(file)
+            self.update_file_status(index, TranscriptionStatus.PENDING, "Waiting for retry...")
 
     def _open_output_folder(self):
         """Open the output folder in file explorer."""

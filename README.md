@@ -1,8 +1,8 @@
 # Redscribe
 
-Desktop application for batch transcription of audio and video files using Deepgram AI.
+Desktop application for batch transcription of audio and video files using Deepgram AI. Now with YouTube integration and automatic retry.
 
-![Version](https://img.shields.io/badge/version-1.0.0-red)
+![Version](https://img.shields.io/badge/version-1.1.0-red)
 ![Platform](https://img.shields.io/badge/platform-Windows%20|%20macOS%20|%20Linux-blue)
 ![Python](https://img.shields.io/badge/python-3.11+-green)
 
@@ -21,16 +21,21 @@ Desktop application for batch transcription of audio and video files using Deepg
 
 - **Batch Processing** - Transcribe multiple audio/video files at once
 - **Large Collections** - Optimized for directories with 2000+ files
+- **YouTube Integration** - Download and transcribe audio from YouTube videos, playlists, and channels using yt-dlp
 - **Multiple Formats** - Export to TXT, SRT, VTT (with timestamps)
 - **Speaker Diarization** - Automatically detects and labels different speakers
 - **Multi-language Support** - 12+ languages including Polish, English, German, French, Spanish, and more
 - **Auto Language Detection** - Automatically detect language for each file
 - **Video Support** - Automatic audio extraction from video files using FFmpeg
 - **Model Selection** - Choose between Nova-2 and Nova-3 models with domain specializations
+- **Automatic Retry** - Failed transcriptions are automatically retried with error classification (network, rate limit, server errors)
+- **Session Logging** - Built-in Logs tab with event stream and session statistics
 - **Progress Tracking** - Real-time progress with cancel option
-  - Individual file status (pending → converting → transcribing → completed/failed)
+  - Individual file status (pending → converting → transcribing → retrying → completed/failed)
   - File size display during processing
+  - Manual retry button for failed files
   - Warning when closing during processing
+- **Tabbed Interface** - Main, YouTube, and Logs tabs for organized workflow
 - **Secure API Storage** - Encrypted API key storage
 
 ## Security
@@ -84,6 +89,7 @@ Click the info button in the bottom-right corner to view:
 - Python 3.11+
 - FFmpeg (for video conversion)
 - Deepgram API key
+- yt-dlp (included in dependencies, for YouTube downloads)
 
 ## Installation
 
@@ -134,7 +140,7 @@ sudo apt update && sudo apt install ffmpeg
 python main.py
 ```
 
-### Basic Workflow
+### Basic Workflow (Main Tab)
 
 1. **Configure API** - Open Settings, enter your Deepgram API key, select model
 2. **Select Directory** - Click "Browse" to select a folder with media files
@@ -149,6 +155,15 @@ python main.py
    > **Note:** If output file already exists, the app automatically creates `filename_1.txt`, `filename_2.txt`, etc.
 6. **Start Transcription** - Click "Start Transcription"
 7. **Monitor Progress** - Watch real-time progress, cancel if needed
+8. **Retry Failed** - If any files fail, click "Retry Failed" to retry them automatically
+
+### YouTube Workflow (YouTube Tab)
+
+1. **Paste URL** - Enter a YouTube video, playlist, or channel URL
+2. **Select Videos** - Choose which videos to download and transcribe
+3. **Configure Options** - Same format/language/diarization options as the Main tab
+4. **Start** - Audio is downloaded via yt-dlp, then transcribed via Deepgram
+5. **Cleanup** - Temporary YouTube audio files are automatically deleted after transcription
 
 ## Supported File Formats
 
@@ -246,18 +261,25 @@ redscribe/
     │   ├── file_scanner.py      # Directory scanning
     │   ├── media_converter.py   # FFmpeg integration
     │   ├── output_writer.py     # Export to TXT/SRT/VTT
-    │   └── transcription.py     # Deepgram API integration
+    │   ├── transcription.py     # Deepgram API integration
+    │   ├── error_classifier.py  # Error classification for retry logic
+    │   └── youtube_downloader.py # YouTube audio download (yt-dlp)
     ├── gui/
-    │   ├── main_window.py       # Main application window
+    │   ├── main_window.py       # Main application window (tabbed)
     │   ├── settings_dialog.py   # API key settings
-    │   ├── progress_dialog.py   # Transcription progress
+    │   ├── progress_dialog.py   # Transcription progress with retry
     │   ├── file_browser_dialog.py # File selection
     │   ├── about_dialog.py      # About window
-    │   └── styles.py            # Design system (colors, fonts)
+    │   ├── styles.py            # Design system (colors, fonts)
+    │   ├── youtube_tab.py       # YouTube tab UI
+    │   ├── youtube_video_dialog.py  # YouTube video selection
+    │   ├── youtube_channel_dialog.py # YouTube channel browser
+    │   └── logs_tab.py          # Session logs viewer
     ├── models/
-    │   └── media_file.py        # Data models
+    │   └── media_file.py        # Data models (with error categories)
     └── utils/
-        └── api_manager.py       # Encrypted API key storage
+        ├── api_manager.py       # Encrypted API key storage
+        └── session_logger.py    # Session event logging
 ```
 
 ## Configuration
@@ -480,6 +502,7 @@ MIT License - see [LICENSE](LICENSE) file for details.
 - **Deepgram** - AI transcription API
 - **CustomTkinter** - Modern Tkinter GUI
 - **FFmpeg** - Audio/video processing
+- **yt-dlp** - YouTube audio extraction
 
 ---
 

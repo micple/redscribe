@@ -6,6 +6,7 @@ from tkinter import filedialog, messagebox
 from pathlib import Path
 import threading
 import os
+import time
 from typing import Optional
 
 try:
@@ -22,17 +23,22 @@ from config import (
     SUPPORTED_LANGUAGES,
     OUTPUT_FORMATS,
     TEMP_DIR,
+    YOUTUBE_TEMP_DIR,
 )
 from src.utils.api_manager import APIManager
 from src.core.file_scanner import FileScanner
 from src.core.media_converter import MediaConverter, FFmpegNotFoundError
 from src.core.transcription import TranscriptionService
 from src.core.output_writer import OutputWriter
-from src.models.media_file import MediaFile, TranscriptionStatus
+from src.models.media_file import MediaFile, TranscriptionStatus, ErrorCategory
+from src.core.error_classifier import ErrorClassifier
 from src.gui.styles import configure_theme, FONTS, PADDING, COLORS, SPACING, BUTTON_STYLES, DIMENSIONS, Tooltip
 from src.gui.settings_dialog import SettingsDialog
 from src.gui.file_browser_dialog import FileBrowserDialog
 from src.gui.progress_dialog import ProgressDialog
+from src.gui.logs_tab import LogsTab
+from src.gui.youtube_tab import YouTubeTab
+from src.utils.session_logger import get_logger
 
 
 class MainWindow(ctk.CTk):
@@ -48,6 +54,7 @@ class MainWindow(ctk.CTk):
         self.api_manager = APIManager()
         self.file_scanner = FileScanner()
         self.output_writer = OutputWriter()
+        self.session_logger = get_logger()
 
         # Cleanup old temporary files from previous sessions
         self._cleanup_temp_files()
@@ -153,35 +160,37 @@ class MainWindow(ctk.CTk):
 
         # Main container with premium dark background
         self.configure(fg_color=COLORS["background"])
-        main_container = ctk.CTkFrame(self, fg_color=COLORS["background"])
-        main_container.grid(row=0, column=0, sticky="nsew", padx=SPACING["lg"], pady=SPACING["lg"])
-        main_container.grid_columnconfigure(0, weight=1)
-        main_container.grid_rowconfigure(2, weight=1)  # File browser expands
 
-        # ===== Header with Credits =====
-        header_frame = ctk.CTkFrame(main_container, fg_color="transparent")
-        header_frame.grid(row=0, column=0, sticky="ew", pady=(0, PADDING["small"]))
-        header_frame.grid_columnconfigure(2, weight=1)
+        # Tab view container
+        tab_container = ctk.CTkFrame(self, fg_color=COLORS["background"])
+        tab_container.grid(row=0, column=0, sticky="nsew", padx=SPACING["lg"], pady=SPACING["lg"])
+        tab_container.grid_columnconfigure(0, weight=1)
+        tab_container.grid_rowconfigure(1, weight=1)
 
-        # Logo [R]edscribe - "[R]" in red + "edscribe" in default text color
-        logo_label = ctk.CTkLabel(
-            header_frame,
-            text="[R]",
-            font=FONTS["title"],
-            text_color=COLORS["primary"],
+        # ===== Top Bar: Tabs on left + Credits on right =====
+        top_bar = ctk.CTkFrame(tab_container, fg_color="transparent")
+        top_bar.grid(row=0, column=0, sticky="ew", pady=(0, PADDING["small"]))
+        top_bar.grid_columnconfigure(1, weight=1)
+
+        # Tab selector (segmented button)
+        self.tab_selector = ctk.CTkSegmentedButton(
+            top_bar,
+            values=["Main", "YouTube", "Logs"],
+            command=self._on_tab_change,
+            fg_color=COLORS["surface"],
+            selected_color=COLORS["primary"],
+            selected_hover_color=COLORS["primary_hover"],
+            unselected_color=COLORS["surface"],
+            unselected_hover_color=COLORS["surface_elevated"],
+            text_color=COLORS["text"],
+            text_color_disabled=COLORS["text_secondary"],
         )
-        logo_label.grid(row=0, column=0, sticky="w")
-
-        title_label = ctk.CTkLabel(
-            header_frame,
-            text="edscribe",
-            font=FONTS["title"],
-        )
-        title_label.grid(row=0, column=1, sticky="w")  # No padding - connected to [R]
+        self.tab_selector.set("Main")
+        self.tab_selector.grid(row=0, column=0, sticky="w")
 
         # Credits display
-        self.credits_frame = ctk.CTkFrame(header_frame, fg_color=COLORS["surface_elevated"], corner_radius=6)
-        self.credits_frame.grid(row=0, column=3, sticky="e", padx=(PADDING["medium"], 0))
+        self.credits_frame = ctk.CTkFrame(top_bar, fg_color=COLORS["surface_elevated"], corner_radius=6)
+        self.credits_frame.grid(row=0, column=2, sticky="e")
 
         self.credits_label = ctk.CTkLabel(
             self.credits_frame,
@@ -192,7 +201,7 @@ class MainWindow(ctk.CTk):
         )
         self.credits_label.pack(side="left")
 
-        # Help icon for credits (hidden by default, shown on error)
+        # Help icon for credits (hidden by default)
         self.credits_help_btn = ctk.CTkLabel(
             self.credits_frame,
             text="(?)",
@@ -202,12 +211,42 @@ class MainWindow(ctk.CTk):
             padx=4,
             pady=2,
         )
-        # Will be shown when there's an error
         self.credits_tooltip = None
+
+        # ===== Content Container =====
+        content_container = ctk.CTkFrame(tab_container, fg_color=COLORS["background"])
+        content_container.grid(row=1, column=0, sticky="nsew")
+        content_container.grid_columnconfigure(0, weight=1)
+        content_container.grid_rowconfigure(0, weight=1)
+
+        # Main tab frame
+        self.main_tab_frame = ctk.CTkFrame(content_container, fg_color=COLORS["background"])
+        self.main_tab_frame.grid(row=0, column=0, sticky="nsew")
+
+        # YouTube tab frame
+        self.youtube_tab_frame = ctk.CTkFrame(content_container, fg_color=COLORS["background"])
+        self.youtube_tab_frame.grid(row=0, column=0, sticky="nsew")
+        self.youtube_tab_frame.grid_remove()  # Hidden by default
+
+        # Logs tab frame
+        self.logs_tab_frame = ctk.CTkFrame(content_container, fg_color=COLORS["background"])
+        self.logs_tab_frame.grid(row=0, column=0, sticky="nsew")
+        self.logs_tab_frame.grid_remove()  # Hidden by default
+
+        # Aliases for the content setup
+        main_tab = self.main_tab_frame
+        logs_tab_frame = self.logs_tab_frame
+
+        # Configure main tab
+        main_tab.grid_columnconfigure(0, weight=1)
+        main_tab.grid_rowconfigure(2, weight=1)
+
+        # ===== Main Tab Content =====
+        main_container = main_tab  # Use main_tab as the container
 
         # ===== Directory Selection Section =====
         dir_frame = ctk.CTkFrame(main_container, fg_color=COLORS["surface"], corner_radius=DIMENSIONS["corner_radius_lg"], border_width=1, border_color=COLORS["border"])
-        dir_frame.grid(row=1, column=0, sticky="ew", pady=(0, SPACING["base"]))
+        dir_frame.grid(row=0, column=0, sticky="ew", pady=(0, SPACING["base"]))
         dir_frame.grid_columnconfigure(1, weight=1)
 
         dir_label = ctk.CTkLabel(dir_frame, text="Directory:", font=FONTS["body"])
@@ -246,7 +285,7 @@ class MainWindow(ctk.CTk):
 
         # ===== Files Selection Section =====
         files_frame = ctk.CTkFrame(main_container, fg_color=COLORS["surface"], corner_radius=DIMENSIONS["corner_radius_lg"], border_width=1, border_color=COLORS["border"])
-        files_frame.grid(row=2, column=0, sticky="ew", pady=(0, SPACING["base"]))
+        files_frame.grid(row=1, column=0, sticky="ew", pady=(0, SPACING["base"]))
         files_frame.grid_columnconfigure(1, weight=1)
 
         files_label = ctk.CTkLabel(files_frame, text="Files to transcribe:", font=FONTS["body"])
@@ -278,7 +317,7 @@ class MainWindow(ctk.CTk):
 
         # ===== Options Section =====
         options_frame = ctk.CTkFrame(main_container, fg_color=COLORS["surface"], corner_radius=DIMENSIONS["corner_radius_lg"], border_width=1, border_color=COLORS["border"])
-        options_frame.grid(row=3, column=0, sticky="ew", pady=(0, SPACING["base"]))
+        options_frame.grid(row=2, column=0, sticky="ew", pady=(0, SPACING["base"]))
         options_frame.grid_columnconfigure(0, weight=1)
         options_frame.grid_columnconfigure(1, weight=1)
 
@@ -351,7 +390,7 @@ class MainWindow(ctk.CTk):
 
         # ===== Output Location Section =====
         output_frame = ctk.CTkFrame(main_container, fg_color=COLORS["surface"], corner_radius=DIMENSIONS["corner_radius_lg"], border_width=1, border_color=COLORS["border"])
-        output_frame.grid(row=4, column=0, sticky="ew", pady=(0, SPACING["base"]))
+        output_frame.grid(row=3, column=0, sticky="ew", pady=(0, SPACING["base"]))
         output_frame.grid_columnconfigure(2, weight=1)
 
         output_label = ctk.CTkLabel(output_frame, text="Output location:", font=FONTS["body"])
@@ -410,7 +449,7 @@ class MainWindow(ctk.CTk):
 
         # ===== Action Buttons =====
         action_frame = ctk.CTkFrame(main_container, fg_color="transparent")
-        action_frame.grid(row=5, column=0, sticky="ew")
+        action_frame.grid(row=4, column=0, sticky="ew")
         action_frame.grid_columnconfigure(1, weight=1)
 
         self.settings_btn = ctk.CTkButton(
@@ -434,7 +473,7 @@ class MainWindow(ctk.CTk):
             state="disabled",
             fg_color=COLORS["primary"],
             hover_color=COLORS["primary_hover"],
-            text_color="#FFFFFF",  # White text on red for contrast
+            text_color="#FFFFFF",
             corner_radius=DIMENSIONS["corner_radius"],
             command=self._start_transcription,
         )
@@ -454,10 +493,44 @@ class MainWindow(ctk.CTk):
         )
         self.about_btn.grid(row=0, column=3, sticky="e", padx=(SPACING["sm"], 0))
 
+        # ===== YouTube Tab Content =====
+        self.youtube_tab_frame.grid_columnconfigure(0, weight=1)
+        self.youtube_tab_frame.grid_rowconfigure(0, weight=1)
+
+        self.youtube_tab = YouTubeTab(
+            self.youtube_tab_frame,
+            api_manager=self.api_manager,
+            session_logger=self.session_logger,
+            open_settings_callback=self._open_settings,
+        )
+        self.youtube_tab.grid(row=0, column=0, sticky="nsew")
+
+        # ===== Logs Tab Content =====
+        logs_tab_frame.grid_columnconfigure(0, weight=1)
+        logs_tab_frame.grid_rowconfigure(0, weight=1)
+
+        self.logs_tab = LogsTab(logs_tab_frame)
+        self.logs_tab.grid(row=0, column=0, sticky="nsew")
+
     def _show_about_dialog(self):
         """Show the About dialog with application info."""
         from src.gui.about_dialog import AboutDialog
         AboutDialog(self)
+
+    def _on_tab_change(self, selected_tab: str):
+        """Handle tab selection change."""
+        # Hide all tabs
+        self.main_tab_frame.grid_remove()
+        self.youtube_tab_frame.grid_remove()
+        self.logs_tab_frame.grid_remove()
+
+        # Show selected tab
+        if selected_tab == "Main":
+            self.main_tab_frame.grid()
+        elif selected_tab == "YouTube":
+            self.youtube_tab_frame.grid()
+        else:  # Logs
+            self.logs_tab_frame.grid()
 
     def _refresh_credits(self):
         """Refresh the credits display."""
@@ -709,6 +782,13 @@ class MainWindow(ctk.CTk):
         for file in self.selected_files:
             file.status = TranscriptionStatus.PENDING
             file.error_message = None
+            file.retry_count = 0
+            file.error_category = ErrorCategory.NONE
+
+        # Start logging session
+        model = self.api_manager.get_model_string(self._get_language_code())
+        self.session_logger.set_model(model.split(":")[0] if ":" in model else model)
+        self.session_logger.start_session()
 
         # Create progress dialog
         self.progress_dialog = ProgressDialog(
@@ -737,7 +817,7 @@ class MainWindow(ctk.CTk):
         self._refresh_credits()
 
     def _process_files(self, api_key: str, converter: MediaConverter):
-        """Process files in background thread."""
+        """Process files in background thread with automatic retry."""
         output_format = self.format_var.get()
         language = self._get_language_code()
         diarize = self.diarize_var.get()
@@ -747,8 +827,8 @@ class MainWindow(ctk.CTk):
 
         total = len(self.selected_files)
         success_count = 0
-        fail_count = 0
 
+        # PHASE 1: Process all files
         for i, file in enumerate(self.selected_files):
             if self.cancel_requested:
                 for remaining in self.selected_files[i:]:
@@ -757,79 +837,249 @@ class MainWindow(ctk.CTk):
                         self.progress_dialog.update_file_status(idx, TranscriptionStatus.SKIPPED))
                 break
 
-            # Update progress with file info (show completed files, not current index)
+            # Update progress with file info
             self.after(0, lambda idx=i, f=file: self.progress_dialog.update_progress(
                 idx, total, f"Processing: {f.name}", f.size_formatted
             ))
 
-            temp_mp3_path = None
+            success = self._process_single_file(
+                file, i, transcription_service, converter,
+                output_format, output_dir, language, diarize
+            )
 
-            try:
-                # Step 1: Convert if video
-                if file.is_video:
-                    file.status = TranscriptionStatus.CONVERTING
-                    self.after(0, lambda idx=i: self.progress_dialog.update_file_status(
-                        idx, TranscriptionStatus.CONVERTING, "Converting to MP3..."
-                    ))
-
-                    temp_mp3_path = converter.to_mp3(file.path)
-                    audio_path = temp_mp3_path
-                else:
-                    audio_path = file.path
-
-                # Step 2: Transcribe
-                file.status = TranscriptionStatus.TRANSCRIBING
-                self.after(0, lambda idx=i: self.progress_dialog.update_file_status(
-                    idx, TranscriptionStatus.TRANSCRIBING, "Sending to Deepgram..."
-                ))
-
-                result = transcription_service.transcribe(
-                    file_path=audio_path,
-                    language=language,
-                    diarize=diarize,
-                )
-
-                if not result.success:
-                    raise Exception(result.error_message or "Transcription failed")
-
-                # Step 3: Save output
-                self.after(0, lambda idx=i: self.progress_dialog.update_file_status(
-                    idx, TranscriptionStatus.TRANSCRIBING, "Saving result..."
-                ))
-
-                output_path = self.output_writer.save(
-                    result=result,
-                    source_path=file.path,
-                    output_format=output_format,
-                    output_dir=output_dir,
-                )
-
-                file.status = TranscriptionStatus.COMPLETED
-                file.output_path = output_path
+            if success:
                 success_count += 1
+            else:
+                # Classify error for retry decision
+                category, _ = ErrorClassifier.classify(file.error_message or "")
+                file.error_category = category
 
-                self.after(0, lambda idx=i: self.progress_dialog.update_file_status(
-                    idx, TranscriptionStatus.COMPLETED, "Done"
-                ))
+        # PHASE 2: Automatic retry for retryable errors
+        if not self.cancel_requested:
+            retryable_files = [
+                (i, f) for i, f in enumerate(self.selected_files)
+                if f.status == TranscriptionStatus.FAILED
+                and f.error_category in (
+                    ErrorCategory.RETRYABLE_NETWORK,
+                    ErrorCategory.RETRYABLE_RATE_LIMIT,
+                    ErrorCategory.RETRYABLE_SERVER,
+                )
+                and f.retry_count < 1  # Only 1 automatic retry
+            ]
 
-            except Exception as e:
-                file.status = TranscriptionStatus.FAILED
-                file.error_message = str(e)
-                fail_count += 1
+            if retryable_files:
+                # Notify user about retry phase
+                self.after(0, lambda count=len(retryable_files):
+                    self.progress_dialog.update_status(f"Retrying {count} failed file(s)..."))
 
-                self.after(0, lambda idx=i, msg=str(e): self.progress_dialog.update_file_status(
-                    idx, TranscriptionStatus.FAILED, msg[:50]
-                ))
+                for i, file in retryable_files:
+                    if self.cancel_requested:
+                        break
 
-            finally:
-                if temp_mp3_path:
-                    converter.cleanup(temp_mp3_path)
+                    # Get delay based on error type
+                    delay = ErrorClassifier.get_retry_delay(file.error_category, 1)
+                    time.sleep(delay)
+
+                    file.retry_count += 1
+                    file.status = TranscriptionStatus.RETRYING
+                    self.session_logger.log_retry(file.name, file.retry_count + 1)
+                    self.after(0, lambda idx=i, attempt=file.retry_count:
+                        self.progress_dialog.update_file_status(
+                            idx, TranscriptionStatus.RETRYING, f"Retrying (attempt {attempt + 1})..."
+                        ))
+
+                    success = self._process_single_file(
+                        file, i, transcription_service, converter,
+                        output_format, output_dir, language, diarize
+                    )
+
+                    if success:
+                        success_count += 1
+
+        # Count final failures
+        fail_count = sum(1 for f in self.selected_files if f.status == TranscriptionStatus.FAILED)
+        failed_files = [f for f in self.selected_files if f.status == TranscriptionStatus.FAILED]
+
+        # End logging session
+        self.session_logger.end_session()
+
+        # Clean up YouTube temporary files (always delete after transcription)
+        for file in self.selected_files:
+            if file.status == TranscriptionStatus.COMPLETED:
+                self._cleanup_youtube_file(file)
 
         # Finalize
         if self.cancel_requested:
             self.after(0, self.progress_dialog.set_cancelled)
         else:
-            self.after(0, lambda: self.progress_dialog.set_completed(success_count, fail_count))
+            self.after(0, lambda: self.progress_dialog.set_completed_with_retry(
+                success_count, fail_count, failed_files, self._retry_failed_files
+            ))
+
+    def _process_single_file(
+        self, file: MediaFile, index: int,
+        transcription_service: TranscriptionService, converter: MediaConverter,
+        output_format: str, output_dir: Optional[Path],
+        language: str, diarize: bool
+    ) -> bool:
+        """
+        Process a single file. Returns True on success, False on failure.
+        """
+        temp_mp3_path = None
+
+        try:
+            # Step 1: Convert if video
+            if file.is_video:
+                file.status = TranscriptionStatus.CONVERTING
+                self.session_logger.log_converting(file.name)
+                self.after(0, lambda idx=index: self.progress_dialog.update_file_status(
+                    idx, TranscriptionStatus.CONVERTING, "Converting to MP3..."
+                ))
+
+                temp_mp3_path = converter.to_mp3(file.path)
+                audio_path = temp_mp3_path
+            else:
+                audio_path = file.path
+
+            # Step 2: Transcribe
+            file.status = TranscriptionStatus.TRANSCRIBING
+            self.session_logger.log_transcribing(file.name)
+            self.after(0, lambda idx=index: self.progress_dialog.update_file_status(
+                idx, TranscriptionStatus.TRANSCRIBING, "Sending to Deepgram..."
+            ))
+
+            result = transcription_service.transcribe(
+                file_path=audio_path,
+                language=language,
+                diarize=diarize,
+            )
+
+            if not result.success:
+                raise Exception(result.error_message or "Transcription failed")
+
+            # Step 3: Save output
+            self.after(0, lambda idx=index: self.progress_dialog.update_file_status(
+                idx, TranscriptionStatus.TRANSCRIBING, "Saving result..."
+            ))
+
+            output_path = self.output_writer.save(
+                result=result,
+                source_path=file.path,
+                output_format=output_format,
+                output_dir=output_dir,
+            )
+
+            file.status = TranscriptionStatus.COMPLETED
+            file.output_path = output_path
+            file.error_message = None
+            file.error_category = ErrorCategory.NONE
+
+            # Log success with duration
+            duration = result.duration_seconds or 0
+            self.session_logger.log_file_completed(file.name, duration)
+
+            self.after(0, lambda idx=index: self.progress_dialog.update_file_status(
+                idx, TranscriptionStatus.COMPLETED, "Done"
+            ))
+
+            return True
+
+        except Exception as e:
+            file.status = TranscriptionStatus.FAILED
+            file.error_message = str(e)
+
+            # Log failure
+            self.session_logger.log_file_failed(file.name, str(e))
+
+            self.after(0, lambda idx=index, msg=str(e): self.progress_dialog.update_file_status(
+                idx, TranscriptionStatus.FAILED, msg[:50]
+            ))
+
+            return False
+
+        finally:
+            if temp_mp3_path:
+                converter.cleanup(temp_mp3_path)
+
+    def _retry_failed_files(self):
+        """Retry all failed files (manual retry triggered by user)."""
+        failed_files = [f for f in self.selected_files if f.status == TranscriptionStatus.FAILED]
+        if not failed_files:
+            return
+
+        api_key = self.api_manager.load_api_key()
+        if not api_key:
+            return
+
+        try:
+            converter = MediaConverter()
+        except FFmpegNotFoundError:
+            return
+
+        # Reset failed files for retry
+        for file in failed_files:
+            file.status = TranscriptionStatus.PENDING
+            file.error_message = None
+            file.error_category = ErrorCategory.NONE
+            # Keep retry_count to track total attempts
+
+        # Update UI
+        self.after(0, lambda: self.progress_dialog.prepare_for_retry(failed_files))
+
+        # Start retry in new thread
+        self.processing_thread = threading.Thread(
+            target=self._process_retry_files,
+            args=(api_key, converter, failed_files),
+            daemon=True,
+        )
+        self.processing_thread.start()
+
+    def _process_retry_files(self, api_key: str, converter: MediaConverter, files_to_retry: list):
+        """Process only the failed files in retry mode."""
+        output_format = self.format_var.get()
+        language = self._get_language_code()
+        diarize = self.diarize_var.get()
+        model = self.api_manager.get_model_string(language)
+        transcription_service = TranscriptionService(api_key, model=model)
+        output_dir = self._get_output_dir()
+
+        success_count = 0
+
+        for file in files_to_retry:
+            if self.cancel_requested:
+                file.status = TranscriptionStatus.SKIPPED
+                continue
+
+            index = self.selected_files.index(file)
+            file.retry_count += 1
+
+            self.after(0, lambda f=file: self.progress_dialog.update_status(
+                f"Retrying: {f.name}"
+            ))
+
+            success = self._process_single_file(
+                file, index, transcription_service, converter,
+                output_format, output_dir, language, diarize
+            )
+
+            if success:
+                success_count += 1
+            else:
+                # Classify error again
+                category, _ = ErrorClassifier.classify(file.error_message or "")
+                file.error_category = category
+
+        # Final count
+        fail_count = sum(1 for f in files_to_retry if f.status == TranscriptionStatus.FAILED)
+        failed_files = [f for f in files_to_retry if f.status == TranscriptionStatus.FAILED]
+
+        # Update completion
+        total_success = sum(1 for f in self.selected_files if f.status == TranscriptionStatus.COMPLETED)
+        total_failed = sum(1 for f in self.selected_files if f.status == TranscriptionStatus.FAILED)
+
+        self.after(0, lambda: self.progress_dialog.set_completed_with_retry(
+            total_success, total_failed, failed_files, self._retry_failed_files
+        ))
 
     def _cleanup_temp_files(self) -> None:
         """
@@ -845,5 +1095,29 @@ class MainWindow(ctk.CTk):
                         file.unlink()
                     except OSError:
                         pass  # Ignore files that can't be deleted (in use, etc.)
+
+            # Also clean YouTube temp directory
+            if YOUTUBE_TEMP_DIR.exists():
+                for file in YOUTUBE_TEMP_DIR.glob("*.mp3"):
+                    try:
+                        file.unlink()
+                    except OSError:
+                        pass
         except Exception:
             pass  # Don't fail startup if cleanup fails
+
+    def _is_youtube_temp_file(self, file: MediaFile) -> bool:
+        """Check if file is a YouTube temporary file that should be cleaned up."""
+        try:
+            return file.path.parent == YOUTUBE_TEMP_DIR
+        except Exception:
+            return False
+
+    def _cleanup_youtube_file(self, file: MediaFile) -> None:
+        """Clean up a YouTube temporary file after transcription."""
+        if self._is_youtube_temp_file(file):
+            try:
+                if file.path.exists():
+                    file.path.unlink()
+            except OSError:
+                pass

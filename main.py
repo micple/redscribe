@@ -6,6 +6,51 @@ Main entry point for the application.
 import sys
 import os
 
+# Fix Tcl/Tk path issue on Windows
+if sys.platform == "win32":
+    python_dir = os.path.dirname(sys.executable)
+    # Handle both venv and direct Python installation
+    if "venv" in python_dir.lower() or "scripts" in python_dir.lower():
+        # venv - go up to find the base Python installation
+        import struct
+        # Find Python installation from registry or common paths
+        possible_paths = [
+            os.path.join(os.environ.get("LOCALAPPDATA", ""), "Programs", "Python", f"Python{sys.version_info.major}{sys.version_info.minor}"),
+            os.path.join(os.environ.get("PROGRAMFILES", ""), "Python", f"Python{sys.version_info.major}{sys.version_info.minor}"),
+            os.path.join(os.environ.get("PROGRAMFILES(X86)", ""), "Python", f"Python{sys.version_info.major}{sys.version_info.minor}"),
+        ]
+        for path in possible_paths:
+            tcl_path = os.path.join(path, "tcl", "tcl8.6")
+            tk_path = os.path.join(path, "tcl", "tk8.6")
+            if os.path.exists(tcl_path) and os.path.exists(tk_path):
+                os.environ["TCL_LIBRARY"] = tcl_path
+                os.environ["TK_LIBRARY"] = tk_path
+                break
+    else:
+        # Direct Python installation
+        tcl_path = os.path.join(python_dir, "tcl", "tcl8.6")
+        tk_path = os.path.join(python_dir, "tcl", "tk8.6")
+        if os.path.exists(tcl_path) and os.path.exists(tk_path):
+            os.environ["TCL_LIBRARY"] = tcl_path
+            os.environ["TK_LIBRARY"] = tk_path
+
+# Add FFmpeg to PATH if installed via winget
+if sys.platform == "win32":
+    import glob
+    localappdata = os.environ.get("LOCALAPPDATA", "")
+    ffmpeg_patterns = [
+        os.path.join(localappdata, "Microsoft", "WinGet", "Packages", "Gyan.FFmpeg*", "ffmpeg-*", "bin"),
+        os.path.join(localappdata, "Microsoft", "WinGet", "Links"),
+        r"C:\ffmpeg\bin",
+        r"C:\Program Files\ffmpeg\bin",
+    ]
+    for pattern in ffmpeg_patterns:
+        matches = glob.glob(pattern)
+        for match in matches:
+            if os.path.isdir(match) and match not in os.environ.get("PATH", ""):
+                os.environ["PATH"] = match + os.pathsep + os.environ.get("PATH", "")
+                break
+
 # Add project root to path for imports
 PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 if PROJECT_ROOT not in sys.path:

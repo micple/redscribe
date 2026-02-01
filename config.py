@@ -13,11 +13,13 @@ APPDATA_DIR = Path(os.environ.get("APPDATA", Path.home())) / APP_NAME
 CONFIG_FILE = APPDATA_DIR / "config.json"
 LOGS_DIR = APPDATA_DIR / "logs"
 TEMP_DIR = Path(os.environ.get("TEMP", "/tmp")) / APP_NAME.lower()
+YOUTUBE_TEMP_DIR = TEMP_DIR / "youtube"
 
 # Ensure directories exist
 APPDATA_DIR.mkdir(parents=True, exist_ok=True)
 LOGS_DIR.mkdir(parents=True, exist_ok=True)
 TEMP_DIR.mkdir(parents=True, exist_ok=True)
+YOUTUBE_TEMP_DIR.mkdir(parents=True, exist_ok=True)
 
 # Supported file extensions
 AUDIO_EXTENSIONS = {".mp3", ".wav", ".flac", ".m4a", ".ogg", ".wma", ".aac"}
@@ -86,6 +88,12 @@ OUTPUT_FORMATS = ["txt", "srt", "vtt"]
 API_TIMEOUT = 300  # 5 minutes
 MAX_RETRIES = 3
 RETRY_DELAY = 2  # seconds
+
+# Retry settings for failed transcriptions
+MAX_AUTO_RETRIES = 1  # Automatic retries per file
+RETRY_BASE_DELAY = 2.0  # Base delay in seconds for network errors
+RETRY_RATE_LIMIT_DELAY = 5.0  # Delay for 429 rate limit errors
+RETRY_SERVER_DELAY = 3.0  # Delay for 5xx server errors
 
 # GUI settings
 WINDOW_MIN_WIDTH = 800

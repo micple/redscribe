@@ -14,10 +14,23 @@ class MediaType(Enum):
     VIDEO = "video"
 
 
+class ErrorCategory(Enum):
+    """Category of error for retry logic."""
+    NONE = "none"
+    RETRYABLE_NETWORK = "retryable_network"      # Timeout, connection errors
+    RETRYABLE_RATE_LIMIT = "retryable_rate_limit"  # 429 - needs delay
+    RETRYABLE_SERVER = "retryable_server"        # 5xx errors
+    NON_RETRYABLE_AUTH = "non_retryable_auth"    # 401, 403
+    NON_RETRYABLE_FILE = "non_retryable_file"    # File not found, too large
+    NON_RETRYABLE_CONFIG = "non_retryable_config"  # FFmpeg missing
+    NON_RETRYABLE_CONVERSION = "non_retryable_conversion"  # Corrupted file
+
+
 class TranscriptionStatus(Enum):
     PENDING = "pending"
     CONVERTING = "converting"
     TRANSCRIBING = "transcribing"
+    RETRYING = "retrying"
     COMPLETED = "completed"
     FAILED = "failed"
     SKIPPED = "skipped"
@@ -32,6 +45,8 @@ class MediaFile:
     status: TranscriptionStatus = TranscriptionStatus.PENDING
     error_message: Optional[str] = None
     output_path: Optional[Path] = None
+    retry_count: int = 0
+    error_category: ErrorCategory = ErrorCategory.NONE
 
     def __post_init__(self):
         if isinstance(self.path, str):
