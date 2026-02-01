@@ -66,6 +66,7 @@ class MainWindow(ctk.CTk):
         self.cancel_requested = False
         self.processing_thread: Optional[threading.Thread] = None
         self.last_output_dir: Optional[Path] = None
+        self._credits_refreshing = False
 
         # Window configuration
         self.title(f"{APP_NAME} v{APP_VERSION}")
@@ -534,9 +535,17 @@ class MainWindow(ctk.CTk):
 
     def _refresh_credits(self):
         """Refresh the credits display."""
+        if self._credits_refreshing:
+            return
+
+        self._credits_refreshing = True
+
         def fetch_credits():
-            balance = self.api_manager.get_balance()
-            self.after(0, lambda: self._update_credits_display(balance))
+            try:
+                balance = self.api_manager.get_balance()
+                self.after(0, lambda: self._update_credits_display(balance))
+            finally:
+                self.after(0, lambda: setattr(self, '_credits_refreshing', False))
 
         thread = threading.Thread(target=fetch_credits, daemon=True)
         thread.start()

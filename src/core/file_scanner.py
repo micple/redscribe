@@ -29,6 +29,7 @@ class FileScanner:
         self,
         directory: Path,
         recursive: bool = False,
+        _visited: Optional[set] = None,
     ) -> DirectoryNode:
         """
         Scan a directory for media files.
@@ -36,6 +37,7 @@ class FileScanner:
         Args:
             directory: Path to the directory to scan
             recursive: If True, also scan subdirectories
+            _visited: Internal set to track visited real paths (symlink loop detection)
 
         Returns:
             DirectoryNode containing the directory structure
@@ -48,9 +50,23 @@ class FileScanner:
         if not directory.is_dir():
             raise NotADirectoryError(f"Path is not a directory: {directory}")
 
-        return self._scan_node(directory, recursive)
+        if _visited is None:
+            _visited = set()
 
-    def _scan_node(self, directory: Path, recursive: bool) -> DirectoryNode:
+        real_path = directory.resolve()
+        if real_path in _visited:
+            return DirectoryNode(
+                path=directory,
+                name=directory.name or str(directory),
+                files=[],
+                subdirs=[],
+            )
+
+        _visited.add(real_path)
+
+        return self._scan_node(directory, recursive, _visited)
+
+    def _scan_node(self, directory: Path, recursive: bool, _visited: Optional[set] = None) -> DirectoryNode:
         """Recursively scan a directory node."""
         node = DirectoryNode(
             path=directory,
@@ -70,7 +86,13 @@ class FileScanner:
             elif entry.is_dir() and recursive:
                 # Skip hidden directories
                 if not entry.name.startswith('.'):
-                    subnode = self._scan_node(entry, recursive)
+                    # Symlink loop detection
+                    real_path = entry.resolve()
+                    if _visited is not None and real_path in _visited:
+                        continue
+                    if _visited is not None:
+                        _visited.add(real_path)
+                    subnode = self._scan_node(entry, recursive, _visited)
                     # Only add if it contains media files
                     if subnode.total_files > 0:
                         node.subdirs.append(subnode)

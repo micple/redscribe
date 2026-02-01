@@ -95,6 +95,9 @@ RETRY_BASE_DELAY = 2.0  # Base delay in seconds for network errors
 RETRY_RATE_LIMIT_DELAY = 5.0  # Delay for 429 rate limit errors
 RETRY_SERVER_DELAY = 3.0  # Delay for 5xx server errors
 
+# FFmpeg timeout
+FFMPEG_CONVERSION_TIMEOUT = 600  # seconds (10 minutes)
+
 # GUI settings
 WINDOW_MIN_WIDTH = 800
 WINDOW_MIN_HEIGHT = 600

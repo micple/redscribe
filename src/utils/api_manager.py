@@ -7,12 +7,15 @@ Security features:
 - File permissions restricted to current user
 """
 import json
+import logging
 import uuid
 import os
 import stat
 import secrets
 import httpx
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
@@ -65,7 +68,15 @@ class APIManager:
             # Generate cryptographically secure random salt
             salt = secrets.token_bytes(SALT_LENGTH)
             config["_salt"] = salt.hex()
-            self._save_config_raw(config)
+            try:
+                self._save_config_raw(config)
+            except Exception as e:
+                logger.error(f"Failed to save salt: {e}")
+                raise RuntimeError("Cannot initialize encryption - failed to save salt") from e
+            # Verify salt was persisted
+            verify_config = self._load_config_raw()
+            if verify_config.get("_salt") != salt.hex():
+                raise RuntimeError("Cannot initialize encryption - failed to save salt")
             return salt
         return bytes.fromhex(salt_hex)
 

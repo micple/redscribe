@@ -71,12 +71,17 @@ class TranscriptionService:
 
         Yields chunks of UPLOAD_CHUNK_SIZE bytes.
         """
-        with open(file_path, "rb") as f:
+        file_handle = None
+        try:
+            file_handle = open(file_path, "rb")
             while True:
-                chunk = f.read(UPLOAD_CHUNK_SIZE)
+                chunk = file_handle.read(UPLOAD_CHUNK_SIZE)
                 if not chunk:
                     break
                 yield chunk
+        finally:
+            if file_handle:
+                file_handle.close()
 
     def transcribe(
         self,

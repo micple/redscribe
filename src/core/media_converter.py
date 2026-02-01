@@ -20,6 +20,7 @@ from config import (
     FFMPEG_SAMPLE_RATE,
     FFMPEG_CHANNELS,
     FFMPEG_BITRATE,
+    FFMPEG_CONVERSION_TIMEOUT,
 )
 
 
@@ -218,6 +219,7 @@ class MediaConverter:
                 cmd,
                 capture_output=True,
                 text=True,
+                timeout=FFMPEG_CONVERSION_TIMEOUT,
                 creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, 'CREATE_NO_WINDOW') else 0,
             )
 
@@ -238,6 +240,10 @@ class MediaConverter:
 
             return output_path
 
+        except subprocess.TimeoutExpired:
+            raise ConversionError(
+                f"FFmpeg conversion timed out after {FFMPEG_CONVERSION_TIMEOUT} seconds: {input_path.name}"
+            )
         except subprocess.SubprocessError as e:
             raise ConversionError(f"FFmpeg execution error: {str(e)}")
 
