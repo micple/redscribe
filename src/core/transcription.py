@@ -83,32 +83,17 @@ class TranscriptionService:
             if file_handle:
                 file_handle.close()
 
-    def transcribe(
-        self,
-        file_path: Path,
-        language: str = "pl",
-        diarize: bool = False,
-        punctuate: bool = True,
-        smart_format: bool = True,
-        progress_callback: Optional[Callable[[str], None]] = None,
-    ) -> TranscriptionResult:
+    def _validate_inputs(self, file_path: Path, language: str) -> Optional[TranscriptionResult]:
         """
-        Transcribe an audio file.
+        Validate file existence and size before transcription.
 
         Args:
-            file_path: Path to the audio file
-            language: Language code (e.g., "pl", "en")
-            diarize: Enable speaker diarization
-            punctuate: Enable automatic punctuation
-            smart_format: Enable smart formatting
-            progress_callback: Optional callback for progress updates
+            file_path: Path to the audio file.
+            language: Language code to validate.
 
         Returns:
-            TranscriptionResult with transcript and metadata
+            A failure TranscriptionResult if validation fails, None if OK.
         """
-        file_path = Path(file_path)
-
-        # Validate file
         if not file_path.exists():
             return TranscriptionResult(
                 success=False,
@@ -122,157 +107,236 @@ class TranscriptionService:
                 error_message=f"File too large (max 2GB): {file_size / (1024**3):.2f} GB"
             )
 
+        return None
+
+    def _build_request_params(
+        self,
+        language: str,
+        diarize: bool,
+        punctuate: bool,
+        smart_format: bool,
+    ) -> dict:
+        """
+        Build Deepgram API query parameters.
+
+        Args:
+            language: Language code or "auto" for detection.
+            diarize: Enable speaker diarization.
+            punctuate: Enable automatic punctuation.
+            smart_format: Enable smart formatting.
+
+        Returns:
+            Dictionary of query parameters.
+        """
+        params = {
+            "model": self.model,
+            "punctuate": str(punctuate).lower(),
+            "smart_format": str(smart_format).lower(),
+            "utterances": "true",
+            "paragraphs": "true",
+        }
+
+        if language == "auto":
+            params["detect_language"] = "true"
+        else:
+            params["language"] = language
+
+        if diarize:
+            params["diarize"] = "true"
+
+        return params
+
+    def _make_request(self, file_path: Path, params: dict) -> 'httpx.Response':
+        """
+        Send the audio file to the Deepgram API.
+
+        Args:
+            file_path: Path to the audio file to upload.
+            params: Query parameters for the API.
+
+        Returns:
+            The httpx Response object.
+
+        Raises:
+            httpx.TimeoutException: On request timeout.
+            httpx.RequestError: On connection errors.
+        """
+        headers = {
+            "Authorization": f"Token {self.api_key}",
+            "Content-Type": self._get_content_type(file_path),
+        }
+
+        with httpx.Client(timeout=API_TIMEOUT) as client:
+            response = client.post(
+                DEEPGRAM_API_URL,
+                params=params,
+                headers=headers,
+                content=self._file_stream(file_path),
+            )
+
+        return response
+
+    def _check_response_errors(self, response: 'httpx.Response') -> Optional[TranscriptionResult]:
+        """
+        Check the HTTP response for error status codes.
+
+        Args:
+            response: The httpx Response to check.
+
+        Returns:
+            A failure TranscriptionResult if an HTTP error occurred, None if OK.
+        """
+        if response.status_code == 401:
+            return TranscriptionResult(success=False, error_message="Invalid API key")
+        elif response.status_code == 403:
+            return TranscriptionResult(success=False, error_message="Access denied for this API key")
+        elif response.status_code == 429:
+            return TranscriptionResult(success=False, error_message="API rate limit exceeded")
+        elif response.status_code >= 400:
+            error_data = response.json() if response.content else {}
+            error_msg = error_data.get("err_msg", f"HTTP error {response.status_code}")
+            return TranscriptionResult(success=False, error_message=error_msg)
+        return None
+
+    def _parse_response(self, data: dict) -> TranscriptionResult:
+        """
+        Parse the Deepgram API JSON response into a TranscriptionResult.
+
+        Args:
+            data: Parsed JSON response dictionary.
+
+        Returns:
+            TranscriptionResult with extracted transcript, words, utterances,
+            paragraphs, and duration.
+        """
+        results = data.get("results", {})
+        metadata = data.get("metadata", {})
+
+        channels = results.get("channels", [])
+        if not channels:
+            return TranscriptionResult(success=False, error_message="No transcription results")
+
+        channel = channels[0]
+        alternatives = channel.get("alternatives", [])
+
+        if not alternatives:
+            return TranscriptionResult(success=False, error_message="No transcript alternatives")
+
+        alternative = alternatives[0]
+        duration = metadata.get("duration")
+
+        # Extract utterances
+        utterances = None
+        utterances_data = results.get("utterances", [])
+        if utterances_data:
+            utterances = [
+                {
+                    "start": u.get("start", 0),
+                    "end": u.get("end", 0),
+                    "text": u.get("transcript", ""),
+                    "speaker": u.get("speaker"),
+                }
+                for u in utterances_data
+            ]
+
+        # Extract words with timestamps
+        words = None
+        words_data = alternative.get("words", [])
+        if words_data:
+            words = [
+                {
+                    "word": w.get("word", ""),
+                    "start": w.get("start", 0),
+                    "end": w.get("end", 0),
+                    "confidence": w.get("confidence", 0),
+                    "speaker": w.get("speaker"),
+                }
+                for w in words_data
+            ]
+
+        # Extract paragraphs
+        paragraphs = None
+        paragraphs_data = alternative.get("paragraphs", {})
+        if paragraphs_data:
+            paragraphs_list = paragraphs_data.get("paragraphs", [])
+            if paragraphs_list:
+                paragraphs = []
+                for p in paragraphs_list:
+                    sentences = p.get("sentences", [])
+                    text = " ".join(s.get("text", "") for s in sentences)
+                    paragraphs.append({
+                        "text": text,
+                        "start": p.get("start"),
+                        "end": p.get("end"),
+                        "speaker": p.get("speaker"),
+                    })
+
+        return TranscriptionResult(
+            success=True,
+            transcript=alternative.get("transcript", ""),
+            words=words,
+            utterances=utterances,
+            paragraphs=paragraphs,
+            duration_seconds=duration,
+        )
+
+    def transcribe(
+        self,
+        file_path: Path,
+        language: str = "pl",
+        diarize: bool = False,
+        punctuate: bool = True,
+        smart_format: bool = True,
+        progress_callback: Optional[Callable[[str], None]] = None,
+    ) -> TranscriptionResult:
+        """
+        Transcribe an audio file using the Deepgram API.
+
+        Orchestrates validation, parameter building, HTTP request, and
+        response parsing. Each step is delegated to a focused helper method.
+
+        Args:
+            file_path: Path to the audio file
+            language: Language code (e.g., "pl", "en") or "auto"
+            diarize: Enable speaker diarization
+            punctuate: Enable automatic punctuation
+            smart_format: Enable smart formatting
+            progress_callback: Optional callback for progress updates
+
+        Returns:
+            TranscriptionResult with transcript and metadata
+        """
+        file_path = Path(file_path)
+
+        # Step 1: Validate inputs
+        validation_error = self._validate_inputs(file_path, language)
+        if validation_error is not None:
+            return validation_error
+
         if progress_callback:
             progress_callback("Preparing file...")
 
         try:
-            # Build query parameters
-            params = {
-                "model": self.model,
-                "punctuate": str(punctuate).lower(),
-                "smart_format": str(smart_format).lower(),
-                "utterances": "true",
-                "paragraphs": "true",
-            }
-
-            # Handle language detection vs specific language
-            if language == "auto":
-                params["detect_language"] = "true"
-            else:
-                params["language"] = language
-
-            if diarize:
-                params["diarize"] = "true"
-
-            # Build headers
-            headers = {
-                "Authorization": f"Token {self.api_key}",
-                "Content-Type": self._get_content_type(file_path),
-            }
+            # Step 2: Build request parameters
+            params = self._build_request_params(language, diarize, punctuate, smart_format)
 
             if progress_callback:
                 progress_callback("Sending to Deepgram API...")
 
-            # Stream file content to reduce memory usage
-            # This avoids loading entire file (up to 2GB) into RAM
-            with httpx.Client(timeout=API_TIMEOUT) as client:
-                response = client.post(
-                    DEEPGRAM_API_URL,
-                    params=params,
-                    headers=headers,
-                    content=self._file_stream(file_path),
-                )
+            # Step 3: Make HTTP request
+            response = self._make_request(file_path, params)
 
-            # Check for HTTP errors
-            if response.status_code == 401:
-                return TranscriptionResult(
-                    success=False,
-                    error_message="Invalid API key"
-                )
-            elif response.status_code == 403:
-                return TranscriptionResult(
-                    success=False,
-                    error_message="Access denied for this API key"
-                )
-            elif response.status_code == 429:
-                return TranscriptionResult(
-                    success=False,
-                    error_message="API rate limit exceeded"
-                )
-            elif response.status_code >= 400:
-                error_data = response.json() if response.content else {}
-                error_msg = error_data.get("err_msg", f"HTTP error {response.status_code}")
-                return TranscriptionResult(
-                    success=False,
-                    error_message=error_msg
-                )
+            # Step 4: Check for HTTP errors
+            http_error = self._check_response_errors(response)
+            if http_error is not None:
+                return http_error
 
             if progress_callback:
                 progress_callback("Processing response...")
 
-            # Parse response
+            # Step 5: Parse response
             data = response.json()
-
-            # Extract results
-            results = data.get("results", {})
-            metadata = data.get("metadata", {})
-
-            channels = results.get("channels", [])
-            if not channels:
-                return TranscriptionResult(
-                    success=False,
-                    error_message="No transcription results"
-                )
-
-            channel = channels[0]
-            alternatives = channel.get("alternatives", [])
-
-            if not alternatives:
-                return TranscriptionResult(
-                    success=False,
-                    error_message="No transcript alternatives"
-                )
-
-            alternative = alternatives[0]
-
-            # Get duration
-            duration = metadata.get("duration")
-
-            # Get utterances for SRT/VTT
-            utterances = None
-            utterances_data = results.get("utterances", [])
-            if utterances_data:
-                utterances = [
-                    {
-                        "start": u.get("start", 0),
-                        "end": u.get("end", 0),
-                        "text": u.get("transcript", ""),
-                        "speaker": u.get("speaker"),
-                    }
-                    for u in utterances_data
-                ]
-
-            # Get words with timestamps
-            words = None
-            words_data = alternative.get("words", [])
-            if words_data:
-                words = [
-                    {
-                        "word": w.get("word", ""),
-                        "start": w.get("start", 0),
-                        "end": w.get("end", 0),
-                        "confidence": w.get("confidence", 0),
-                        "speaker": w.get("speaker"),
-                    }
-                    for w in words_data
-                ]
-
-            # Get paragraphs
-            paragraphs = None
-            paragraphs_data = alternative.get("paragraphs", {})
-            if paragraphs_data:
-                paragraphs_list = paragraphs_data.get("paragraphs", [])
-                if paragraphs_list:
-                    paragraphs = []
-                    for p in paragraphs_list:
-                        # Combine sentences into paragraph text
-                        sentences = p.get("sentences", [])
-                        text = " ".join(s.get("text", "") for s in sentences)
-                        paragraphs.append({
-                            "text": text,
-                            "start": p.get("start"),
-                            "end": p.get("end"),
-                            "speaker": p.get("speaker"),
-                        })
-
-            return TranscriptionResult(
-                success=True,
-                transcript=alternative.get("transcript", ""),
-                words=words,
-                utterances=utterances,
-                paragraphs=paragraphs,
-                duration_seconds=duration,
-            )
+            return self._parse_response(data)
 
         except httpx.TimeoutException:
             return TranscriptionResult(

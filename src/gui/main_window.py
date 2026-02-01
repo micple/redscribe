@@ -26,6 +26,8 @@ from config import (
     YOUTUBE_TEMP_DIR,
 )
 from src.utils.api_manager import APIManager
+from src.utils.temp_file_manager import TempFileManager
+from src.core.transcription_orchestrator import TranscriptionOrchestrator
 from src.core.file_scanner import FileScanner
 from src.core.media_converter import MediaConverter, FFmpegNotFoundError
 from src.core.transcription import TranscriptionService
@@ -55,6 +57,7 @@ class MainWindow(ctk.CTk):
         self.file_scanner = FileScanner()
         self.output_writer = OutputWriter()
         self.session_logger = get_logger()
+        self.temp_manager = TempFileManager(TEMP_DIR)
 
         # Cleanup old temporary files from previous sessions
         self._cleanup_temp_files()
@@ -933,82 +936,59 @@ class MainWindow(ctk.CTk):
     ) -> bool:
         """
         Process a single file. Returns True on success, False on failure.
+
+        Delegates to TranscriptionOrchestrator for the actual business logic.
+        The GUI is updated via the _on_transcription_event callback.
         """
-        temp_mp3_path = None
+        orchestrator = TranscriptionOrchestrator(
+            converter=converter,
+            transcription_service=transcription_service,
+            output_writer=self.output_writer,
+            session_logger=self.session_logger,
+            event_callback=lambda evt, f, extra: self._on_transcription_event(evt, f, extra, index),
+        )
+        return orchestrator.process_file(
+            file=file,
+            output_format=output_format,
+            output_dir=output_dir,
+            language=language,
+            diarize=diarize,
+            smart_format=True,
+        )
 
-        try:
-            # Step 1: Convert if video
-            if file.is_video:
-                file.status = TranscriptionStatus.CONVERTING
-                self.session_logger.log_converting(file.name)
-                self.after(0, lambda idx=index: self.progress_dialog.update_file_status(
-                    idx, TranscriptionStatus.CONVERTING, "Converting to MP3..."
-                ))
+    def _on_transcription_event(self, event_type: str, file: MediaFile, extra: dict, index: int) -> None:
+        """
+        Handle events from the TranscriptionOrchestrator.
 
-                temp_mp3_path = converter.to_mp3(file.path)
-                audio_path = temp_mp3_path
-            else:
-                audio_path = file.path
+        Updates the progress dialog on the GUI thread using self.after(0, ...).
 
-            # Step 2: Transcribe
-            file.status = TranscriptionStatus.TRANSCRIBING
-            self.session_logger.log_transcribing(file.name)
+        Args:
+            event_type: One of 'converting', 'transcribing', 'saving', 'completed', 'failed'.
+            file: The MediaFile being processed.
+            extra: Additional data (e.g. output_path, error message).
+            index: Index of the file in self.selected_files (for progress dialog).
+        """
+        if event_type == "converting":
+            self.after(0, lambda idx=index: self.progress_dialog.update_file_status(
+                idx, TranscriptionStatus.CONVERTING, "Converting to MP3..."
+            ))
+        elif event_type == "transcribing":
             self.after(0, lambda idx=index: self.progress_dialog.update_file_status(
                 idx, TranscriptionStatus.TRANSCRIBING, "Sending to Deepgram..."
             ))
-
-            result = transcription_service.transcribe(
-                file_path=audio_path,
-                language=language,
-                diarize=diarize,
-            )
-
-            if not result.success:
-                raise Exception(result.error_message or "Transcription failed")
-
-            # Step 3: Save output
+        elif event_type == "saving":
             self.after(0, lambda idx=index: self.progress_dialog.update_file_status(
                 idx, TranscriptionStatus.TRANSCRIBING, "Saving result..."
             ))
-
-            output_path = self.output_writer.save(
-                result=result,
-                source_path=file.path,
-                output_format=output_format,
-                output_dir=output_dir,
-            )
-
-            file.status = TranscriptionStatus.COMPLETED
-            file.output_path = output_path
-            file.error_message = None
-            file.error_category = ErrorCategory.NONE
-
-            # Log success with duration
-            duration = result.duration_seconds or 0
-            self.session_logger.log_file_completed(file.name, duration)
-
+        elif event_type == "completed":
             self.after(0, lambda idx=index: self.progress_dialog.update_file_status(
                 idx, TranscriptionStatus.COMPLETED, "Done"
             ))
-
-            return True
-
-        except Exception as e:
-            file.status = TranscriptionStatus.FAILED
-            file.error_message = str(e)
-
-            # Log failure
-            self.session_logger.log_file_failed(file.name, str(e))
-
-            self.after(0, lambda idx=index, msg=str(e): self.progress_dialog.update_file_status(
-                idx, TranscriptionStatus.FAILED, msg[:50]
+        elif event_type == "failed":
+            msg = str(extra.get("error", "Unknown error"))[:50]
+            self.after(0, lambda idx=index, m=msg: self.progress_dialog.update_file_status(
+                idx, TranscriptionStatus.FAILED, m
             ))
-
-            return False
-
-        finally:
-            if temp_mp3_path:
-                converter.cleanup(temp_mp3_path)
 
     def _retry_failed_files(self):
         """Retry all failed files (manual retry triggered by user)."""
@@ -1098,20 +1078,10 @@ class MainWindow(ctk.CTk):
         been left behind if the application crashed or was force-closed.
         """
         try:
-            if TEMP_DIR.exists():
-                for file in TEMP_DIR.glob("*.mp3"):
-                    try:
-                        file.unlink()
-                    except OSError:
-                        pass  # Ignore files that can't be deleted (in use, etc.)
-
+            self.temp_manager.cleanup_pattern("*.mp3")
             # Also clean YouTube temp directory
-            if YOUTUBE_TEMP_DIR.exists():
-                for file in YOUTUBE_TEMP_DIR.glob("*.mp3"):
-                    try:
-                        file.unlink()
-                    except OSError:
-                        pass
+            yt_manager = TempFileManager(YOUTUBE_TEMP_DIR)
+            yt_manager.cleanup_pattern("*.mp3")
         except Exception:
             pass  # Don't fail startup if cleanup fails
 
@@ -1125,8 +1095,5 @@ class MainWindow(ctk.CTk):
     def _cleanup_youtube_file(self, file: MediaFile) -> None:
         """Clean up a YouTube temporary file after transcription."""
         if self._is_youtube_temp_file(file):
-            try:
-                if file.path.exists():
-                    file.path.unlink()
-            except OSError:
-                pass
+            yt_manager = TempFileManager(YOUTUBE_TEMP_DIR)
+            yt_manager.cleanup_file(file.path)

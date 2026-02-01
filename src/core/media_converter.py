@@ -22,6 +22,7 @@ from config import (
     FFMPEG_BITRATE,
     FFMPEG_CONVERSION_TIMEOUT,
 )
+from src.utils.temp_file_manager import TempFileManager
 
 
 class FFmpegNotFoundError(Exception):
@@ -45,6 +46,7 @@ class MediaConverter:
     def __init__(self):
         self._ffmpeg_path = self._get_ffmpeg_path()
         self._ffprobe_path = self._get_ffprobe_path()
+        self.temp_manager = TempFileManager(TEMP_DIR)
 
     def _get_base_path(self) -> Path:
         """Get base path for bundled executables."""
@@ -238,7 +240,7 @@ class MediaConverter:
             if progress_callback:
                 progress_callback(f"Conversion complete: {input_path.name}")
 
-            return output_path
+            return self.temp_manager.track(output_path)
 
         except subprocess.TimeoutExpired:
             raise ConversionError(
@@ -254,24 +256,11 @@ class MediaConverter:
         Args:
             temp_path: Path to the temporary file to remove
         """
-        try:
-            temp_path = Path(temp_path)
-            if temp_path.exists() and TEMP_DIR in temp_path.parents:
-                temp_path.unlink()
-        except OSError:
-            pass  # Ignore cleanup errors
+        self.temp_manager.cleanup_file(Path(temp_path))
 
     def cleanup_all(self) -> None:
         """Remove all temporary files created by this converter."""
-        try:
-            if TEMP_DIR.exists():
-                for file in TEMP_DIR.glob("*.mp3"):
-                    try:
-                        file.unlink()
-                    except OSError:
-                        pass
-        except OSError:
-            pass
+        self.temp_manager.cleanup_pattern("*.mp3")
 
     def get_duration(self, input_path: Path) -> Optional[float]:
         """

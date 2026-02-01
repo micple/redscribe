@@ -17,6 +17,7 @@ except ImportError:
     HAS_YTDLP = False
 
 from config import YOUTUBE_TEMP_DIR
+from src.utils.temp_file_manager import TempFileManager
 
 
 class YtDlpNotFoundError(Exception):
@@ -111,6 +112,7 @@ class YouTubeDownloader:
             )
         self.temp_dir = temp_dir
         self.temp_dir.mkdir(parents=True, exist_ok=True)
+        self.temp_manager = TempFileManager(self.temp_dir)
 
     def detect_url_type(self, url: str) -> str:
         """
@@ -352,22 +354,12 @@ class YouTubeDownloader:
 
     def cleanup(self, path: Path) -> None:
         """Delete a downloaded file."""
-        try:
-            if path and path.exists():
-                path.unlink()
-        except OSError:
-            pass
+        if path:
+            self.temp_manager.cleanup_file(Path(path))
 
     def cleanup_all(self) -> None:
         """Delete all temporary files in the YouTube temp directory."""
-        try:
-            for file in self.temp_dir.glob("*.mp3"):
-                try:
-                    file.unlink()
-                except OSError:
-                    pass
-        except Exception:
-            pass
+        self.temp_manager.cleanup_all()
 
     def extract_channel_content(
         self,

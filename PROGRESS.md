@@ -69,3 +69,24 @@
 **Files changed:** requirements.txt
 **What was done:** Updated: Pillow>=11.0.0 (CVE-2024-28219 fix), httpx>=0.28.0, cryptography>=43.0.0, customtkinter>=5.2.2.
 **Tests:** 173 passed, 1 skipped
+
+## [2026-02-01] Task 2.1 — Create TempFileManager and integrate
+**Status:** Completed
+**Agent:** architect
+**Files changed:** src/utils/temp_file_manager.py (NEW), tests/test_temp_file_manager.py (NEW), src/core/media_converter.py, src/core/youtube_downloader.py, src/gui/main_window.py, src/gui/youtube_tab.py
+**What was done:** Created TempFileManager class with track(), cleanup_file() (with security check), cleanup_pattern(), cleanup_tracked(), cleanup_all(). Integrated into MediaConverter, YouTubeDownloader, MainWindow, YouTubeTab — replacing duplicate cleanup methods with centralized TempFileManager calls.
+**Tests:** 20+ tests in test_temp_file_manager.py, coverage 86%
+
+## [2026-02-01] Task 2.2 — Create TranscriptionOrchestrator and integrate
+**Status:** Completed
+**Agent:** architect
+**Files changed:** src/core/transcription_orchestrator.py (NEW), tests/test_transcription_orchestrator.py (NEW), src/gui/main_window.py
+**What was done:** Created TranscriptionOrchestrator with process_file() and event emission (converting, transcribing, saving, completed, failed). Integrated into MainWindow._process_files() with _on_transcription_event() callback handler.
+**Tests:** 15+ tests in test_transcription_orchestrator.py, coverage 100%
+
+## [2026-02-01] Task 2.3 — Refactor TranscriptionService.transcribe()
+**Status:** Completed
+**Agent:** architect
+**Files changed:** src/core/transcription.py, tests/test_transcription.py
+**What was done:** Split 205-line transcribe() method into 5 methods: _validate_inputs(), _build_request_params(), _make_request(), _parse_response(), and orchestrating transcribe(). Each method has single responsibility.
+**Tests:** Updated and expanded tests, coverage 89% (was 77%)

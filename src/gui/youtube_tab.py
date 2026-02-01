@@ -35,6 +35,7 @@ from src.models.media_file import MediaFile, TranscriptionStatus, ErrorCategory
 from src.core.transcription import TranscriptionService
 from src.core.output_writer import OutputWriter
 from src.core.error_classifier import ErrorClassifier
+from src.utils.temp_file_manager import TempFileManager
 
 
 class YouTubeTab(ctk.CTkFrame):
@@ -62,6 +63,7 @@ class YouTubeTab(ctk.CTkFrame):
         self.session_logger = session_logger
         self.open_settings_callback = open_settings_callback
         self.output_writer = OutputWriter()
+        self.temp_manager = TempFileManager(YOUTUBE_TEMP_DIR)
 
         self.downloader: Optional[YouTubeDownloader] = None
         self.video_list: List[VideoInfo] = []  # All fetched videos
@@ -1269,12 +1271,7 @@ class YouTubeTab(ctk.CTkFrame):
     def _cleanup_temp_files(self):
         """Clean up downloaded temporary files."""
         for path in self.downloaded_files:
-            try:
-                if path.exists():
-                    path.unlink()
-            except OSError:
-                pass
+            self.temp_manager.cleanup_file(path)
         self.downloaded_files.clear()
 
-        if self.downloader:
-            self.downloader.cleanup_all()
+        self.temp_manager.cleanup_all()

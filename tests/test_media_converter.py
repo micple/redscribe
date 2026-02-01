@@ -141,15 +141,16 @@ class TestFFmpegTimeout:
 
 class TestCleanupAll:
     def test_cleanup_all_removes_mp3s(self, converter, tmp_path):
-        with patch("src.core.media_converter.TEMP_DIR", tmp_path):
-            f1 = tmp_path / "a.mp3"
-            f2 = tmp_path / "b.mp3"
-            f3 = tmp_path / "c.txt"
-            f1.write_bytes(b"x")
-            f2.write_bytes(b"x")
-            f3.write_bytes(b"x")
-            converter.cleanup_all()
-            assert not f1.exists()
-            assert not f2.exists()
-            assert f3.exists()
+        from src.utils.temp_file_manager import TempFileManager
+        converter.temp_manager = TempFileManager(tmp_path)
+        f1 = tmp_path / "a.mp3"
+        f2 = tmp_path / "b.mp3"
+        f3 = tmp_path / "c.txt"
+        f1.write_bytes(b"x")
+        f2.write_bytes(b"x")
+        f3.write_bytes(b"x")
+        converter.cleanup_all()
+        assert not f1.exists()
+        assert not f2.exists()
+        assert f3.exists()
 

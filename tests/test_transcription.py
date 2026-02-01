@@ -133,3 +133,145 @@ class TestFileStreamBugFix:
         svc = TranscriptionService(api_key="test")
         chunks = list(svc._file_stream(sample_audio_file))
         assert len(chunks) > 0
+
+
+# ---------------------------------------------------------------------------
+# Tests for refactored helper methods (Stage 2)
+# ---------------------------------------------------------------------------
+
+class TestValidateInputs:
+    def test_validate_inputs_file_not_found(self, tmp_path):
+        svc = TranscriptionService(api_key="test")
+        result = svc._validate_inputs(tmp_path / "nope.mp3", "en")
+        assert result is not None
+        assert result.success is False
+        assert "does not exist" in result.error_message.lower()
+
+    def test_validate_inputs_file_too_large(self, tmp_path):
+        svc = TranscriptionService(api_key="test")
+        big = tmp_path / "huge.mp3"
+        big.write_bytes(b"x" * 100)
+        # Patch the max file size to something tiny
+        with patch("src.core.transcription.DEEPGRAM_MAX_FILE_SIZE", 50):
+            result = svc._validate_inputs(big, "en")
+        assert result is not None
+        assert result.success is False
+        assert "too large" in result.error_message.lower()
+
+    def test_validate_inputs_ok(self, sample_audio_file):
+        svc = TranscriptionService(api_key="test")
+        result = svc._validate_inputs(sample_audio_file, "en")
+        assert result is None  # No error
+
+
+class TestBuildRequestParams:
+    def test_auto_language(self):
+        svc = TranscriptionService(api_key="test")
+        params = svc._build_request_params("auto", False, True, True)
+        assert "detect_language" in params
+        assert "language" not in params
+
+    def test_specific_language(self):
+        svc = TranscriptionService(api_key="test")
+        params = svc._build_request_params("pl", False, True, True)
+        assert params["language"] == "pl"
+        assert "detect_language" not in params
+
+    def test_diarize_enabled(self):
+        svc = TranscriptionService(api_key="test")
+        params = svc._build_request_params("en", True, True, True)
+        assert params["diarize"] == "true"
+
+    def test_diarize_disabled(self):
+        svc = TranscriptionService(api_key="test")
+        params = svc._build_request_params("en", False, True, True)
+        assert "diarize" not in params
+
+    def test_smart_format_false(self):
+        svc = TranscriptionService(api_key="test")
+        params = svc._build_request_params("en", False, True, False)
+        assert params["smart_format"] == "false"
+
+    def test_model_included(self):
+        svc = TranscriptionService(api_key="test", model="nova-3")
+        params = svc._build_request_params("en", False, True, True)
+        assert params["model"] == "nova-3"
+
+
+class TestCheckResponseErrors:
+    def test_401_returns_error(self):
+        svc = TranscriptionService(api_key="test")
+        resp = MagicMock()
+        resp.status_code = 401
+        result = svc._check_response_errors(resp)
+        assert result is not None
+        assert "Invalid API key" in result.error_message
+
+    def test_403_returns_error(self):
+        svc = TranscriptionService(api_key="test")
+        resp = MagicMock()
+        resp.status_code = 403
+        result = svc._check_response_errors(resp)
+        assert result is not None
+        assert "Access denied" in result.error_message
+
+    def test_429_returns_error(self):
+        svc = TranscriptionService(api_key="test")
+        resp = MagicMock()
+        resp.status_code = 429
+        result = svc._check_response_errors(resp)
+        assert result is not None
+        assert "rate limit" in result.error_message.lower()
+
+    def test_500_returns_error(self):
+        svc = TranscriptionService(api_key="test")
+        resp = MagicMock()
+        resp.status_code = 500
+        resp.content = b'{"err_msg": "server error"}'
+        resp.json.return_value = {"err_msg": "server error"}
+        result = svc._check_response_errors(resp)
+        assert result is not None
+        assert "server error" in result.error_message
+
+    def test_200_returns_none(self):
+        svc = TranscriptionService(api_key="test")
+        resp = MagicMock()
+        resp.status_code = 200
+        result = svc._check_response_errors(resp)
+        assert result is None
+
+
+class TestParseResponse:
+    def test_parse_success(self):
+        svc = TranscriptionService(api_key="test")
+        result = svc._parse_response(FAKE_DEEPGRAM_RESPONSE)
+        assert result.success is True
+        assert "test transcript" in result.transcript
+        assert result.duration_seconds == 1.5
+
+    def test_parse_no_channels(self):
+        svc = TranscriptionService(api_key="test")
+        result = svc._parse_response({"results": {"channels": []}, "metadata": {}})
+        assert result.success is False
+        assert "No transcription results" in result.error_message
+
+    def test_parse_no_alternatives(self):
+        svc = TranscriptionService(api_key="test")
+        data = {"results": {"channels": [{"alternatives": []}]}, "metadata": {}}
+        result = svc._parse_response(data)
+        assert result.success is False
+        assert "No transcript alternatives" in result.error_message
+
+    def test_parse_extracts_utterances(self):
+        svc = TranscriptionService(api_key="test")
+        result = svc._parse_response(FAKE_DEEPGRAM_RESPONSE)
+        assert result.utterances is not None
+        assert len(result.utterances) == 1
+        assert result.utterances[0]["text"] == "This is a test transcript."
+
+    def test_parse_extracts_words(self):
+        svc = TranscriptionService(api_key="test")
+        result = svc._parse_response(FAKE_DEEPGRAM_RESPONSE)
+        assert result.words is not None
+        assert len(result.words) == 2
+        assert result.words[0]["word"] == "This"
