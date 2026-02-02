@@ -694,9 +694,15 @@ class MainWindow(ctk.CTk):
         def fetch_credits():
             try:
                 balance = self.api_manager.get_balance()
-                self.after(0, lambda: self._update_credits_display(balance))
+                try:
+                    self.after(0, lambda: self._update_credits_display(balance))
+                except RuntimeError:
+                    pass  # Window may have been destroyed
             finally:
-                self.after(0, lambda: setattr(self, '_credits_refreshing', False))
+                try:
+                    self.after(0, lambda: setattr(self, '_credits_refreshing', False))
+                except RuntimeError:
+                    self._credits_refreshing = False
 
         thread = threading.Thread(target=fetch_credits, daemon=True)
         thread.start()
