@@ -48,7 +48,7 @@ class MediaFile:
     retry_count: int = 0
     error_category: ErrorCategory = ErrorCategory.NONE
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if isinstance(self.path, str):
             self.path = Path(self.path)
 
@@ -100,7 +100,7 @@ class MediaFile:
     @property
     def size_formatted(self) -> str:
         """Human-readable file size."""
-        size = self.size_bytes
+        size: float = float(self.size_bytes)
         for unit in ["B", "KB", "MB", "GB"]:
             if size < 1024:
                 return f"{size:.1f} {unit}"
@@ -120,10 +120,10 @@ class MediaFile:
     def __str__(self) -> str:
         return f"{self.name} ({self.size_formatted})"
 
-    def __hash__(self):
+    def __hash__(self) -> int:
         return hash(self.path)
 
-    def __eq__(self, other):
+    def __eq__(self, other: object) -> bool:
         if isinstance(other, MediaFile):
             return self.path == other.path
         return False

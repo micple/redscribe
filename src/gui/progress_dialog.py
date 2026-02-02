@@ -140,6 +140,14 @@ class ProgressDialog(ctk.CTkToplevel):
         )
         self.warning_label.pack(pady=(0, PADDING["small"]))
 
+        self.workers_label = ctk.CTkLabel(
+            self._main_frame,
+            text="Workers: 0/0 active",
+            font=FONTS["small"],
+            text_color=COLORS["text_secondary"],
+        )
+        self.workers_label.pack(pady=(0, PADDING["small"]))
+
     def _create_file_list(self):
         """Create the scrollable file progress list.
 
@@ -366,6 +374,15 @@ class ProgressDialog(ctk.CTkToplevel):
     def update_status(self, message: str):
         """Update the status label with a message."""
         self.status_label.configure(text=message)
+
+    def update_workers_count(self, active: int, total: int):
+        """Update the workers count display.
+
+        Args:
+            active: Number of currently active workers processing files.
+            total: Maximum number of workers allowed.
+        """
+        self.workers_label.configure(text=f"Workers: {active}/{total} active")
 
     def set_completed_with_retry(
         self,

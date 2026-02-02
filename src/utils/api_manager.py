@@ -20,9 +20,12 @@ from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 import base64
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple, cast
 
-from config import CONFIG_FILE, API_TIMEOUT, DEEPGRAM_DEFAULT_MODEL, DEEPGRAM_DEFAULT_SPECIALIZATION, PBKDF2_ITERATIONS
+from config import (
+    CONFIG_FILE, API_TIMEOUT, DEEPGRAM_DEFAULT_MODEL, DEEPGRAM_DEFAULT_SPECIALIZATION, PBKDF2_ITERATIONS,
+    MAX_CONCURRENT_WORKERS, MIN_CONCURRENT_WORKERS, MAX_CONCURRENT_WORKERS_LIMIT
+)
 
 # Salt length in bytes (256 bits)
 SALT_LENGTH = 32
@@ -31,9 +34,9 @@ SALT_LENGTH = 32
 class APIManager:
     """Manages Deepgram API key storage and validation."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize the API manager with lazy Fernet encryption setup."""
-        self._fernet = None  # Lazy initialization
+        self._fernet: Optional[Fernet] = None  # Lazy initialization
 
     def _get_machine_id(self) -> str:
         """Get a unique machine identifier with secure fallback."""
@@ -99,7 +102,7 @@ class APIManager:
         """Get or create Fernet instance (lazy initialization)."""
         if self._fernet is None:
             self._fernet = self._create_fernet()
-        return self._fernet
+        return cast(Fernet, self._fernet)
 
     def _load_config_raw(self) -> Dict[str, Any]:
         """Load raw configuration from file (without triggering Fernet init)."""
@@ -107,7 +110,7 @@ class APIManager:
             return {}
         try:
             with open(CONFIG_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
+                return cast(Dict[str, Any], json.load(f))
         except (json.JSONDecodeError, IOError):
             return {}
 
@@ -313,7 +316,7 @@ class APIManager:
 
     def get_model(self) -> str:
         """Get the selected Deepgram model."""
-        return self.get_preference("model", DEEPGRAM_DEFAULT_MODEL)
+        return cast(str, self.get_preference("model", DEEPGRAM_DEFAULT_MODEL))
 
     def set_model(self, model: str) -> None:
         """Set the Deepgram model."""
@@ -321,7 +324,7 @@ class APIManager:
 
     def get_specialization(self) -> str:
         """Get the selected model specialization."""
-        return self.get_preference("specialization", DEEPGRAM_DEFAULT_SPECIALIZATION)
+        return cast(str, self.get_preference("specialization", DEEPGRAM_DEFAULT_SPECIALIZATION))
 
     def set_specialization(self, specialization: str) -> None:
         """Set the model specialization."""
@@ -340,3 +343,26 @@ class APIManager:
         if specialization == "general" or language != "en":
             return model
         return f"{model}-{specialization}"
+
+    def get_max_concurrent_workers(self) -> int:
+        """Get the maximum number of concurrent transcription workers.
+
+        Returns:
+            The configured number of concurrent workers (1-10).
+        """
+        return int(self.get_preference("max_concurrent_workers", MAX_CONCURRENT_WORKERS))
+
+    def set_max_concurrent_workers(self, workers: int) -> None:
+        """Set the maximum number of concurrent transcription workers.
+
+        Args:
+            workers: Number of concurrent workers (must be between 1 and 10).
+
+        Raises:
+            ValueError: If workers is outside the valid range.
+        """
+        if not MIN_CONCURRENT_WORKERS <= workers <= MAX_CONCURRENT_WORKERS_LIMIT:
+            raise ValueError(
+                f"Workers must be between {MIN_CONCURRENT_WORKERS} and {MAX_CONCURRENT_WORKERS_LIMIT}"
+            )
+        self.set_preference("max_concurrent_workers", workers)

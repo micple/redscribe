@@ -9,6 +9,7 @@ Handles:
 """
 import logging
 import json
+import threading
 
 _module_logger = logging.getLogger(__name__)
 import uuid
@@ -110,7 +111,7 @@ class SessionLogger:
         "nova-3": 0.0059,
     }
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize the session logger and load persisted stats and events."""
         self.current_session: Optional[SessionStats] = None
         # App session - cumulative stats from app start to close (not persisted)
@@ -123,6 +124,7 @@ class SessionLogger:
         self.on_event: Optional[Callable[[LogEntry], None]] = None
         self.on_stats_update: Optional[Callable[[], None]] = None
         self.model: str = "nova-2"
+        self._lock = threading.Lock()
 
         # Load persisted data
         self._load_stats()
@@ -230,37 +232,38 @@ class SessionLogger:
 
     def end_session(self) -> None:
         """End the current session and persist stats."""
-        if not self.current_session:
-            return
+        with self._lock:
+            if not self.current_session:
+                return
 
-        self.current_session.ended = datetime.now().isoformat()
+            self.current_session.ended = datetime.now().isoformat()
 
-        # Update all-time stats
-        self.all_time.total_files += self.current_session.files_count
-        self.all_time.successful_files += self.current_session.successful
-        self.all_time.failed_files += self.current_session.failed
-        self.all_time.total_duration_seconds += self.current_session.duration_seconds
-        self.all_time.total_cost_usd += self.current_session.cost_usd
+            # Update all-time stats
+            self.all_time.total_files += self.current_session.files_count
+            self.all_time.successful_files += self.current_session.successful
+            self.all_time.failed_files += self.current_session.failed
+            self.all_time.total_duration_seconds += self.current_session.duration_seconds
+            self.all_time.total_cost_usd += self.current_session.cost_usd
 
-        self._save_stats()
+            self._save_stats()
 
-        # Log summary with duration
-        duration_str = self._format_duration(self.current_session.duration_seconds)
-        self._add_event(
-            LogLevel.INFO,
-            f"Session ended: {self.current_session.successful}/{self.current_session.files_count} files, "
-            f"{duration_str}, ${self.current_session.cost_usd:.2f}"
-        )
+            # Log summary with duration
+            duration_str = self._format_duration(self.current_session.duration_seconds)
+            self._add_event(
+                LogLevel.INFO,
+                f"Session ended: {self.current_session.successful}/{self.current_session.files_count} files, "
+                f"{duration_str}, ${self.current_session.cost_usd:.2f}"
+            )
 
-        # Accumulate to app session (visible until app closes)
-        self.app_session.files_count += self.current_session.files_count
-        self.app_session.successful += self.current_session.successful
-        self.app_session.failed += self.current_session.failed
-        self.app_session.duration_seconds += self.current_session.duration_seconds
-        self.app_session.cost_usd += self.current_session.cost_usd
+            # Accumulate to app session (visible until app closes)
+            self.app_session.files_count += self.current_session.files_count
+            self.app_session.successful += self.current_session.successful
+            self.app_session.failed += self.current_session.failed
+            self.app_session.duration_seconds += self.current_session.duration_seconds
+            self.app_session.cost_usd += self.current_session.cost_usd
 
-        self.current_session = None
-        self._notify_stats_update()
+            self.current_session = None
+            self._notify_stats_update()
 
     # === Logging Methods ===
 
@@ -295,21 +298,22 @@ class SessionLogger:
             file_name: Name of the completed file.
             duration_seconds: Audio duration in seconds (for cost calculation).
         """
-        cost = self.calculate_cost(duration_seconds)
+        with self._lock:
+            cost = self.calculate_cost(duration_seconds)
 
-        if self.current_session:
-            self.current_session.files_count += 1
-            self.current_session.successful += 1
-            self.current_session.duration_seconds += duration_seconds
-            self.current_session.cost_usd += cost
+            if self.current_session:
+                self.current_session.files_count += 1
+                self.current_session.successful += 1
+                self.current_session.duration_seconds += duration_seconds
+                self.current_session.cost_usd += cost
 
-        duration_str = self._format_duration(duration_seconds) if duration_seconds else ""
-        self._add_event(
-            LogLevel.SUCCESS,
-            f"Completed{f' ({duration_str})' if duration_str else ''}",
-            file_name
-        )
-        self._notify_stats_update()
+            duration_str = self._format_duration(duration_seconds) if duration_seconds else ""
+            self._add_event(
+                LogLevel.SUCCESS,
+                f"Completed{f' ({duration_str})' if duration_str else ''}",
+                file_name
+            )
+            self._notify_stats_update()
 
     def log_file_failed(self, file_name: str, error: str) -> None:
         """Log file failure and update session statistics.
@@ -318,12 +322,13 @@ class SessionLogger:
             file_name: Name of the failed file.
             error: Error message describing the failure.
         """
-        if self.current_session:
-            self.current_session.files_count += 1
-            self.current_session.failed += 1
+        with self._lock:
+            if self.current_session:
+                self.current_session.files_count += 1
+                self.current_session.failed += 1
 
-        self._add_event(LogLevel.ERROR, f"Failed: {error[:50]}", file_name)
-        self._notify_stats_update()
+            self._add_event(LogLevel.ERROR, f"Failed: {error[:50]}", file_name)
+            self._notify_stats_update()
 
     def log_retry(self, file_name: str, attempt: int) -> None:
         """Log retry attempt."""

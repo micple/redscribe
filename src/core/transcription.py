@@ -40,7 +40,7 @@ class TranscriptionResult:
 class TranscriptionService:
     """Service for transcribing audio files using Deepgram API."""
 
-    def __init__(self, api_key: str, model: str = None):
+    def __init__(self, api_key: str, model: Optional[str] = None):
         """
         Initialize the transcription service.
 

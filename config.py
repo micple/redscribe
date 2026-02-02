@@ -111,3 +111,8 @@ UPLOAD_CHUNK_SIZE = 64 * 1024  # 64KB chunks
 
 # Security settings
 PBKDF2_ITERATIONS = 600000  # OWASP 2023 recommendation
+
+# Parallel transcription configuration
+MAX_CONCURRENT_WORKERS = 3          # Default: 3 concurrent files
+MIN_CONCURRENT_WORKERS = 1          # Sequential mode
+MAX_CONCURRENT_WORKERS_LIMIT = 10   # Hard upper limit

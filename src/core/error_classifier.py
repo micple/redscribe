@@ -4,7 +4,7 @@ Error classification for retry logic.
 Classifies transcription errors to determine if they should be retried.
 """
 import logging
-from typing import Tuple
+from typing import Tuple, cast
 
 logger = logging.getLogger(__name__)
 
@@ -129,15 +129,15 @@ class ErrorClassifier:
         Returns:
             Delay in seconds before retry.
         """
-        base_delays = {
+        base_delays: dict[ErrorCategory, float] = {
             ErrorCategory.RETRYABLE_RATE_LIMIT: 5.0,  # 429 needs longer delay
             ErrorCategory.RETRYABLE_NETWORK: 2.0,
             ErrorCategory.RETRYABLE_SERVER: 3.0,
         }
 
-        base = base_delays.get(category, 2.0)
+        base = cast(float, base_delays.get(category, 2.0))
         # Exponential backoff: delay * 2^(attempt-1)
-        return base * (2 ** (attempt - 1))
+        return float(base * (2 ** (attempt - 1)))
 
     @classmethod
     def is_retryable(cls, error_message: str) -> bool:

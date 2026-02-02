@@ -46,7 +46,7 @@ class PathSecurityError(Exception):
 class MediaConverter:
     """Converts video files to MP3 for transcription."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         """
         Initialize the media converter.
 
@@ -56,9 +56,9 @@ class MediaConverter:
         Raises:
             FFmpegNotFoundError: If FFmpeg cannot be found.
         """
-        self._ffmpeg_path = self._get_ffmpeg_path()
-        self._ffprobe_path = self._get_ffprobe_path()
-        self.temp_manager = TempFileManager(TEMP_DIR)
+        self._ffmpeg_path: str = self._get_ffmpeg_path()
+        self._ffprobe_path: str = self._get_ffprobe_path()
+        self.temp_manager: TempFileManager = TempFileManager(TEMP_DIR)
 
     def _get_base_path(self) -> Path:
         """Get base path for bundled executables."""

@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 import uuid
 from pathlib import Path
 from dataclasses import dataclass
-from typing import Optional, Callable
+from typing import Optional, Callable, Any
 from concurrent.futures import ThreadPoolExecutor
 
 try:
@@ -280,7 +280,7 @@ class YouTubeDownloader:
         file_id = str(uuid.uuid4())[:8]
         output_template = str(self.temp_dir / f"%(title).50s_{file_id}.%(ext)s")
 
-        def progress_hook(d):
+        def progress_hook(d: dict[str, Any]) -> None:
             if on_progress and d['status'] == 'downloading':
                 total = d.get('total_bytes') or d.get('total_bytes_estimate', 0)
                 downloaded = d.get('downloaded_bytes', 0)

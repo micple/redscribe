@@ -9,7 +9,13 @@ from pathlib import Path
 
 from src.utils.api_manager import APIManager
 from src.gui.styles import FONTS, PADDING, COLORS, SPACING, DIMENSIONS
-from config import DEEPGRAM_MODELS, DEEPGRAM_SPECIALIZATIONS
+from config import (
+    DEEPGRAM_MODELS,
+    DEEPGRAM_SPECIALIZATIONS,
+    MIN_CONCURRENT_WORKERS,
+    MAX_CONCURRENT_WORKERS,
+    MAX_CONCURRENT_WORKERS_LIMIT,
+)
 
 
 def _set_dialog_icon(dialog):
@@ -39,7 +45,7 @@ class SettingsDialog(ctk.CTkToplevel):
 
         # Window configuration
         self.title("Settings")
-        self.geometry("500x580")
+        self.geometry("500x680")
         self.resizable(False, False)
         self.transient(parent)
         self.grab_set()
@@ -47,7 +53,7 @@ class SettingsDialog(ctk.CTkToplevel):
         # Center on parent
         self.update_idletasks()
         x = parent.winfo_x() + (parent.winfo_width() - 500) // 2
-        y = parent.winfo_y() + (parent.winfo_height() - 580) // 2
+        y = parent.winfo_y() + (parent.winfo_height() - 680) // 2
         self.geometry(f"+{x}+{y}")
 
         self._create_widgets()
@@ -70,6 +76,7 @@ class SettingsDialog(ctk.CTkToplevel):
 
         self._create_api_key_section()
         self._create_model_section()
+        self._create_performance_section()
         self._create_info_section()
         self._create_status_section()
         self._create_dialog_buttons()
@@ -214,6 +221,65 @@ class SettingsDialog(ctk.CTkToplevel):
         )
         spec_info_label.pack(anchor="w", pady=(SPACING["xs"], 0))
 
+        separator = ctk.CTkFrame(self._content_frame, fg_color=COLORS["border"], height=1)
+        separator.pack(fill="x", pady=SPACING["md"])
+
+    def _create_performance_section(self):
+        """Create the performance settings section.
+
+        Creates:
+            - Performance section title
+            - Concurrent transcriptions slider (1-10)
+            - Value label showing current selection
+            - Help text about rate limits
+        """
+        perf_title = ctk.CTkLabel(
+            self._content_frame,
+            text="Performance",
+            font=FONTS["heading"],
+        )
+        perf_title.pack(anchor="w", pady=(0, SPACING["sm"]))
+
+        workers_label = ctk.CTkLabel(
+            self._content_frame,
+            text="Concurrent transcriptions:",
+            font=FONTS["body"],
+        )
+        workers_label.pack(anchor="w", pady=(0, SPACING["xs"]))
+
+        slider_frame = ctk.CTkFrame(self._content_frame, fg_color="transparent")
+        slider_frame.pack(fill="x", pady=PADDING["small"])
+
+        self.workers_slider = ctk.CTkSlider(
+            slider_frame,
+            from_=MIN_CONCURRENT_WORKERS,
+            to=MAX_CONCURRENT_WORKERS_LIMIT,
+            number_of_steps=MAX_CONCURRENT_WORKERS_LIMIT - MIN_CONCURRENT_WORKERS,
+            fg_color=COLORS["surface_elevated"],
+            progress_color=COLORS["primary"],
+            button_color=COLORS["primary"],
+            button_hover_color=COLORS["primary_hover"],
+            command=self._on_workers_slider_change,
+        )
+        self.workers_slider.set(self.api_manager.get_max_concurrent_workers())
+        self.workers_slider.pack(side="left", fill="x", expand=True, padx=(0, PADDING["small"]))
+
+        self.workers_value_label = ctk.CTkLabel(
+            slider_frame,
+            text=f"{self.api_manager.get_max_concurrent_workers()} files",
+            font=FONTS["body"],
+            width=60,
+        )
+        self.workers_value_label.pack(side="right")
+
+        help_label = ctk.CTkLabel(
+            self._content_frame,
+            text="⚠️ Higher values = faster batches but may hit API rate limits",
+            font=FONTS["small"],
+            text_color=COLORS["text_tertiary"],
+        )
+        help_label.pack(anchor="w", pady=(SPACING["xs"], 0))
+
     def _create_info_section(self):
         """Create the informational section with API key URL.
 
@@ -327,6 +393,13 @@ class SettingsDialog(ctk.CTkToplevel):
         if self.spec_var.get() not in specializations:
             self.spec_var.set("general")
 
+    def _on_workers_slider_change(self, value: float):
+        """Handle workers slider change - update value label."""
+        workers = int(value)
+        self.workers_value_label.configure(
+            text=f"{workers} file{'s' if workers != 1 else ''}"
+        )
+
     def _toggle_show_key(self):
         """Toggle visibility of the API key."""
         self._show_key = not self._show_key
@@ -381,6 +454,7 @@ class SettingsDialog(ctk.CTkToplevel):
             self.api_manager.save_api_key(api_key)
             self.api_manager.set_model(self.model_var.get())
             self.api_manager.set_specialization(self.spec_var.get())
+            self.api_manager.set_max_concurrent_workers(int(self.workers_slider.get()))
             self._set_status("Settings saved", "success")
 
             if self.on_save:

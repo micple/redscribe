@@ -8,7 +8,10 @@ from pathlib import Path
 import threading
 import os
 import time
+import uuid
+from datetime import datetime
 from typing import Optional
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +34,7 @@ from config import (
 )
 from src.utils.api_manager import APIManager
 from src.utils.temp_file_manager import TempFileManager
+from src.utils.batch_state_manager import BatchStateManager
 from src.core.transcription_orchestrator import TranscriptionOrchestrator
 from src.core.file_scanner import FileScanner
 from src.core.media_converter import MediaConverter, FFmpegNotFoundError
@@ -38,6 +42,7 @@ from src.core.transcription import TranscriptionService
 from src.core.output_writer import OutputWriter
 from src.models.media_file import MediaFile, TranscriptionStatus, ErrorCategory
 from src.core.error_classifier import ErrorClassifier
+from contracts.batch_state import BatchState, BatchSettings, FileState, BatchStatistics
 from src.gui.styles import configure_theme, FONTS, PADDING, COLORS, SPACING, BUTTON_STYLES, DIMENSIONS, Tooltip
 from src.gui.settings_dialog import SettingsDialog
 from src.gui.file_browser_dialog import FileBrowserDialog
@@ -70,10 +75,11 @@ class MainWindow(ctk.CTk):
         self.selected_directory: Optional[Path] = None
         self.selected_files: list[MediaFile] = []
         self.root_node = None  # DirectoryNode from file scanner
-        self.cancel_requested = False
+        self.cancel_event = threading.Event()
         self.processing_thread: Optional[threading.Thread] = None
         self.last_output_dir: Optional[Path] = None
         self._credits_refreshing = False
+        self.current_batch_id: Optional[str] = None
 
         # Window configuration
         self.title(f"{APP_NAME} v{APP_VERSION}")
@@ -88,6 +94,9 @@ class MainWindow(ctk.CTk):
 
         # Check for API key and load credits on startup
         self.after(100, self._on_startup)
+
+        # Check for pending batch after startup
+        self.after(500, self._check_pending_batch)
 
     def _set_window_icon(self):
         """Set the window icon with a red R."""
@@ -159,6 +168,87 @@ class MainWindow(ctk.CTk):
                 "Please enter your Deepgram API key to use this application."
             )
             self._open_settings()
+
+    def _check_pending_batch(self):
+        """Check for interrupted batch and offer to resume."""
+        try:
+            if not BatchStateManager.has_pending_batch():
+                return
+
+            state = BatchStateManager.load_batch_state()
+            if state is None:
+                BatchStateManager.clear_batch_state()
+                return
+
+            incomplete = sum(1 for f in state.files if f.status.value in ("pending", "failed"))
+            completed = sum(1 for f in state.files if f.status.value == "completed")
+
+            if incomplete == 0:
+                BatchStateManager.clear_batch_state()
+                return
+
+            resume = messagebox.askyesno(
+                "Resume Batch",
+                f"Found incomplete batch:\n"
+                f"  {completed} completed, {incomplete} remaining.\n\n"
+                f"Resume transcription?"
+            )
+
+            if resume:
+                self._resume_batch(state)
+            else:
+                BatchStateManager.clear_batch_state()
+        except Exception as e:
+            logger.error(f"Error checking pending batch: {e}")
+
+    def _resume_batch(self, state: BatchState):
+        """Resume an interrupted batch."""
+        # Verify completed files still exist
+        missing = BatchStateManager.verify_completed_files(state)
+        if missing:
+            BatchStateManager.mark_files_for_reprocessing(state, missing)
+            messagebox.showwarning(
+                "Missing Files",
+                f"{len(missing)} output file(s) missing and will be reprocessed."
+            )
+
+        # Reconstruct selected_files from state
+        self.selected_files = []
+        for file_state in state.files:
+            media_file = MediaFile(Path(file_state.source_path))
+            # Map status
+            status_map = {
+                "pending": TranscriptionStatus.PENDING,
+                "converting": TranscriptionStatus.CONVERTING,
+                "transcribing": TranscriptionStatus.TRANSCRIBING,
+                "completed": TranscriptionStatus.COMPLETED,
+                "failed": TranscriptionStatus.FAILED,
+                "skipped": TranscriptionStatus.SKIPPED,
+            }
+            media_file.status = status_map.get(file_state.status.value, TranscriptionStatus.PENDING)
+            if file_state.output_path:
+                media_file.output_path = Path(file_state.output_path)
+            media_file.error_message = file_state.error_message
+            media_file.retry_count = file_state.retry_count
+            self.selected_files.append(media_file)
+
+        # Restore settings
+        self.format_var.set(state.settings.output_format)
+
+        # Update UI
+        count = len(self.selected_files)
+        if count > 0:
+            total_size = sum(f.size_bytes for f in self.selected_files)
+            size_str = self._format_size(total_size)
+            self.files_summary_label.configure(
+                text=f"{count} files selected ({size_str}) - Resumed",
+                text_color=COLORS["primary"],
+            )
+
+        self.current_batch_id = state.batch_id
+        self._update_start_button()
+
+        logger.info(f"Resumed batch {state.batch_id} with {len(self.selected_files)} files")
 
     def _create_widgets(self):
         """Create main window widgets using grid layout.
@@ -844,7 +934,7 @@ class MainWindow(ctk.CTk):
             return
 
         # Reset state
-        self.cancel_requested = False
+        self.cancel_event.clear()
         self.last_output_dir = self._get_output_dir() or (
             self.selected_files[0].parent_dir if self.selected_files else None
         )
@@ -859,6 +949,34 @@ class MainWindow(ctk.CTk):
         model = self.api_manager.get_model_string(self._get_language_code())
         self.session_logger.set_model(model.split(":")[0] if ":" in model else model)
         self.session_logger.start_session()
+
+        # Create batch state for persistence
+        if not self.current_batch_id:
+            self.current_batch_id = str(uuid.uuid4())
+
+        output_dir = self._get_output_dir()
+        batch_state = BatchState(
+            batch_id=self.current_batch_id,
+            created_at=datetime.now(),
+            last_updated=datetime.now(),
+            settings=BatchSettings(
+                output_format=self.format_var.get(),
+                output_dir=str(output_dir) if output_dir else None,
+                language=self._get_language_code(),
+                diarize=self.diarize_var.get(),
+                smart_format=self.api_manager.get_preference("smart_formatting_enabled", True),
+                max_concurrent_workers=self.api_manager.get_max_concurrent_workers(),
+            ),
+            files=[
+                FileState(source_path=str(f.path), status="pending", retry_count=f.retry_count)
+                for f in self.selected_files
+            ],
+            statistics=BatchStatistics(
+                total_files=len(self.selected_files),
+                pending=len(self.selected_files),
+            ),
+        )
+        BatchStateManager.save_batch_state(batch_state)
 
         # Create progress dialog
         self.progress_dialog = ProgressDialog(
@@ -879,15 +997,23 @@ class MainWindow(ctk.CTk):
 
     def _cancel_transcription(self):
         """Cancel the transcription process."""
-        self.cancel_requested = True
+        self.cancel_event.set()
 
     def _on_progress_close(self):
         """Handle progress dialog close."""
         self._scan_directory()
         self._refresh_credits()
 
+        # Clear batch state if dialog is closed
+        # (Keep it if there are failed files for potential resume)
+        if self.current_batch_id:
+            has_failed = any(f.status == TranscriptionStatus.FAILED for f in self.selected_files)
+            if not has_failed:
+                BatchStateManager.clear_batch_state()
+                self.current_batch_id = None
+
     def _process_files(self, api_key: str, converter: MediaConverter):
-        """Process files in background thread with automatic retry."""
+        """Process files in background thread with automatic retry using parallel workers."""
         output_format = self.format_var.get()
         language = self._get_language_code()
         diarize = self.diarize_var.get()
@@ -897,35 +1023,51 @@ class MainWindow(ctk.CTk):
 
         total = len(self.selected_files)
         success_count = 0
+        max_workers = self.api_manager.get_max_concurrent_workers()
 
-        # PHASE 1: Process all files
-        for i, file in enumerate(self.selected_files):
-            if self.cancel_requested:
-                for remaining in self.selected_files[i:]:
-                    remaining.status = TranscriptionStatus.SKIPPED
-                    self.after(0, lambda idx=self.selected_files.index(remaining):
-                        self.progress_dialog.update_file_status(idx, TranscriptionStatus.SKIPPED))
-                break
+        # PHASE 1: Process all files concurrently
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {}
+            for i, file in enumerate(self.selected_files):
+                if file.status in (TranscriptionStatus.PENDING, TranscriptionStatus.FAILED):
+                    future = executor.submit(
+                        self._process_single_file,
+                        file, i, transcription_service, converter,
+                        output_format, output_dir, language, diarize
+                    )
+                    futures[future] = (i, file)
 
-            # Update progress with file info
-            self.after(0, lambda idx=i, f=file: self.progress_dialog.update_progress(
-                idx, total, f"Processing: {f.name}", f.size_formatted
-            ))
+            for future in as_completed(futures):
+                if self.cancel_event.is_set():
+                    executor.shutdown(wait=False, cancel_futures=True)
+                    # Mark remaining files as skipped
+                    for remaining_future, (idx, remaining_file) in futures.items():
+                        if not remaining_future.done():
+                            remaining_file.status = TranscriptionStatus.SKIPPED
+                            self.after(0, lambda i=idx: self.progress_dialog.update_file_status(
+                                i, TranscriptionStatus.SKIPPED
+                            ))
+                    break
 
-            success = self._process_single_file(
-                file, i, transcription_service, converter,
-                output_format, output_dir, language, diarize
-            )
+                index, file = futures[future]
 
-            if success:
-                success_count += 1
-            else:
-                # Classify error for retry decision
-                category, _ = ErrorClassifier.classify(file.error_message or "")
-                file.error_category = category
+                try:
+                    success = future.result()
+                    if success:
+                        success_count += 1
+                    else:
+                        # Classify error for retry decision
+                        category, _ = ErrorClassifier.classify(file.error_message or "")
+                        file.error_category = category
+                except Exception as e:
+                    logger.error(f"Error processing {file.name}: {e}")
+                    file.status = TranscriptionStatus.FAILED
+                    file.error_message = str(e)
+                    category, _ = ErrorClassifier.classify(str(e))
+                    file.error_category = category
 
         # PHASE 2: Automatic retry for retryable errors
-        if not self.cancel_requested:
+        if not self.cancel_event.is_set():
             retryable_files = [
                 (i, f) for i, f in enumerate(self.selected_files)
                 if f.status == TranscriptionStatus.FAILED
@@ -943,7 +1085,7 @@ class MainWindow(ctk.CTk):
                     self.progress_dialog.update_status(f"Retrying {count} failed file(s)..."))
 
                 for i, file in retryable_files:
-                    if self.cancel_requested:
+                    if self.cancel_event.is_set():
                         break
 
                     # Get delay based on error type
@@ -979,12 +1121,17 @@ class MainWindow(ctk.CTk):
                 self._cleanup_youtube_file(file)
 
         # Finalize
-        if self.cancel_requested:
+        if self.cancel_event.is_set():
             self.after(0, self.progress_dialog.set_cancelled)
         else:
             self.after(0, lambda: self.progress_dialog.set_completed_with_retry(
                 success_count, fail_count, failed_files, self._retry_failed_files
             ))
+
+        # Clear batch state after completion
+        if self.current_batch_id and not self.cancel_event.is_set():
+            BatchStateManager.clear_batch_state()
+            self.current_batch_id = None
 
     def _process_single_file(
         self, file: MediaFile, index: int,
@@ -1042,11 +1189,34 @@ class MainWindow(ctk.CTk):
             self.after(0, lambda idx=index: self.progress_dialog.update_file_status(
                 idx, TranscriptionStatus.COMPLETED, "Done"
             ))
+            # Update batch state
+            if self.current_batch_id:
+                try:
+                    BatchStateManager.update_file_status(
+                        batch_id=self.current_batch_id,
+                        source_path=str(file.path),
+                        status="completed",
+                        output_path=str(extra.get("output_path", "")),
+                        duration_seconds=extra.get("duration_seconds"),
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to update batch state: {e}")
         elif event_type == "failed":
             msg = str(extra.get("error", "Unknown error"))[:50]
             self.after(0, lambda idx=index, m=msg: self.progress_dialog.update_file_status(
                 idx, TranscriptionStatus.FAILED, m
             ))
+            # Update batch state
+            if self.current_batch_id:
+                try:
+                    BatchStateManager.update_file_status(
+                        batch_id=self.current_batch_id,
+                        source_path=str(file.path),
+                        status="failed",
+                        error_message=str(extra.get("error", "")),
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to update batch state: {e}")
 
     def _retry_failed_files(self):
         """Retry all failed files (manual retry triggered by user)."""
@@ -1093,7 +1263,7 @@ class MainWindow(ctk.CTk):
         success_count = 0
 
         for file in files_to_retry:
-            if self.cancel_requested:
+            if self.cancel_event.is_set():
                 file.status = TranscriptionStatus.SKIPPED
                 continue
 
@@ -1127,6 +1297,11 @@ class MainWindow(ctk.CTk):
         self.after(0, lambda: self.progress_dialog.set_completed_with_retry(
             total_success, total_failed, failed_files, self._retry_failed_files
         ))
+
+        # Clear batch state after retry completion if no failures
+        if self.current_batch_id and total_failed == 0:
+            BatchStateManager.clear_batch_state()
+            self.current_batch_id = None
 
     def _cleanup_temp_files(self) -> None:
         """
