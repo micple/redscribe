@@ -1043,6 +1043,12 @@ class MainWindow(ctk.CTk):
                     )
                     futures[future] = (i, file)
 
+            # Initialize progress tracking
+            completed_count = 0
+            active_count = min(len(futures), max_workers)
+            self.after(0, lambda a=active_count, t=max_workers:
+                self.progress_dialog.update_workers_count(a, t))
+
             for future in as_completed(futures):
                 if self.cancel_event.is_set():
                     executor.shutdown(wait=False, cancel_futures=True)
@@ -1071,6 +1077,17 @@ class MainWindow(ctk.CTk):
                     file.error_message = str(e)
                     category, _ = ErrorClassifier.classify(str(e))
                     file.error_category = category
+
+                # Update progress after each file completes
+                completed_count += 1
+                active_count = max(0, active_count - 1)
+                self.after(0, lambda c=completed_count, t=total, f=file:
+                    self.progress_dialog.update_progress(c, t, f"Completed: {f.name}"))
+                self.after(0, lambda a=active_count, t=max_workers:
+                    self.progress_dialog.update_workers_count(a, t))
+
+        # Reset workers count after parallel processing completes
+        self.after(0, lambda: self.progress_dialog.update_workers_count(0, max_workers))
 
         # PHASE 2: Automatic retry for retryable errors
         if not self.cancel_event.is_set():
@@ -1106,6 +1123,10 @@ class MainWindow(ctk.CTk):
                             idx, TranscriptionStatus.RETRYING, f"Retrying (attempt {attempt + 1})..."
                         ))
 
+                    # Update workers count before retry
+                    self.after(0, lambda t=max_workers:
+                        self.progress_dialog.update_workers_count(1, t))
+
                     success = self._process_single_file(
                         file, i, transcription_service, converter,
                         output_format, output_dir, language, diarize
@@ -1113,6 +1134,12 @@ class MainWindow(ctk.CTk):
 
                     if success:
                         success_count += 1
+
+                    # Update progress after retry completes
+                    completed_count += 1
+                    self.after(0, lambda c=completed_count, t=total, f=file:
+                        self.progress_dialog.update_progress(c, t, f"Retry completed: {f.name}"))
+                    self.after(0, lambda: self.progress_dialog.update_workers_count(0, max_workers))
 
         # Count final failures
         fail_count = sum(1 for f in self.selected_files if f.status == TranscriptionStatus.FAILED)

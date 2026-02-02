@@ -189,3 +189,10 @@
 - Statistics recalculation verified for all state transitions
 - Worker configuration persistence verified across instances
 - All tests are fast, isolated, and deterministic
+
+## [2026-02-02] Fix — Progress dialog bugs in parallel transcription
+**Status:** Completed
+**Agent:** frontend
+**Files changed:** src/gui/main_window.py
+**What was done:** Fixed 3 bugs in _process_files(): (1) Progress bar stuck at 0% - added update_progress() calls after each file completes, (2) Workers display frozen at "0/0 active" - added update_workers_count() calls with active tracking, (3) Status text stuck on "Preparing..." - added status messages showing completed file names. Also fixed Settings dialog height (500x780) for visible Test/Save buttons, dialog off-screen positioning (max(0,x/y) clamp), and RuntimeError in credits refresh thread.
+**Tests:** 284 passed, 1 skipped
