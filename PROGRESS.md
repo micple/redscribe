@@ -238,3 +238,45 @@
 **Files changed:** src/gui/main_window.py
 **What was done:** Updated MainWindow._resume_batch() to call BatchHistoryManager.verify_batch_files(state). Missing sources marked as SKIPPED with error "Source file not found". Missing outputs marked as PENDING for reprocessing (status/stats updated). Show warning messageboxes for missing sources and outputs separately. Proper statistics updates (completed count decremented, pending incremented for missing outputs).
 **Tests:** Manual verification needed for resume workflow
+
+## [2026-02-02] Tasks 6.4-6.4.6 — Batch Manager Tab
+**Status:** ✅ Completed
+**Agent:** frontend (🎨)
+**Files changed:** src/gui/batch_manager_tab.py (NEW), src/gui/main_window.py
+**What was done:** Created BatchManagerTab with master-detail layout (batch list + detail panel). Batch cards show status badges (Active green, Paused orange, Completed blue), progress bars, file counts. Detail panel shows metadata, settings, file list with checkboxes. Actions: Resume All, Resume Selected, Export CSV, Delete. Auto-refresh every 2s. Integrated tab in MainWindow._create_tabs().
+**Tests:** 14 tests in test_batch_manager_tab.py (mocked GUI)
+
+## [2026-02-02] Task 6.5.1 — Startup Notification
+**Status:** ✅ Completed
+**Agent:** frontend (🎨)
+**Files changed:** src/gui/main_window.py
+**What was done:** Updated _check_pending_batch() to show simple messagebox with Yes/No. Yes switches to Batch Manager tab. No pauses batch and keeps in history.
+**Tests:** Manual verification
+
+## [2026-02-02] Tasks 6.6.1-6.6.2 — Cancel UX Improvement
+**Status:** ✅ Completed
+**Agent:** frontend (🎨)
+**Files changed:** src/gui/progress_dialog.py, src/gui/main_window.py
+**What was done:** Updated progress dialog warning text to "Closing will pause the batch. You can resume later from Batch Manager tab." Added _on_batch_cancelled() method showing post-cancel info dialog with completion summary. Calls BatchHistoryManager.pause_batch() on cancel.
+**Tests:** Manual verification
+
+## [2026-02-02] Task 6.7.1 — Settings Restore Verification
+**Status:** ✅ Completed
+**Agent:** frontend (🎨)
+**Files changed:** src/gui/main_window.py
+**What was done:** Verified all settings restored in _resume_batch(): output_format, output_dir, language, diarize, smart_format, max_concurrent_workers. Added temporary UI indicator label "Resumed batch - settings restored from previous session" shown for 5 seconds.
+**Tests:** Manual verification
+
+## [2026-02-02] Tasks 6.8-6.9 — Stage 6 Tests
+**Status:** ✅ Completed
+**Agent:** testwriter (🧪)
+**Files changed:** tests/test_batch_history_manager.py (NEW), tests/test_batch_state_writer.py (NEW), tests/test_batch_manager_tab.py (NEW), tests/test_batch_lifecycle_integration.py (NEW)
+**What was done:** Created 83 tests total: 36 for BatchHistoryManager (lifecycle, index, cleanup, atomic writes, verify files), 23 for BatchStateWriter (singleton, throttle, batching, shutdown), 14 for BatchManagerTab (mocked GUI), 10 integration tests (E2E lifecycle, selective resume, missing files). Fixed race condition in BatchStateWriter.flush() — flush signal during batching now writes state before signaling completion.
+**Tests:** 353 passed, 0 failed, 1 skipped
+
+## [2026-02-02] Fix — Batch Manager empty list for active/paused batches
+**Status:** ✅ Completed
+**Agent:** frontend (🎨)
+**Files changed:** src/gui/batch_manager_tab.py
+**What was done:** Active/paused batches stored in active.json were not shown in Batch Manager because list_batches() only reads index.json. Updated _load_batches() to also check for active batch via load_active_batch() and prepend it to the list.
+**Tests:** 353 passed, 0 failed
