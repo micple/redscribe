@@ -246,8 +246,31 @@ class BatchManagerTab(ctk.CTkFrame):
         elif filter_value == "Completed":
             status_filter = BatchStatus.COMPLETED
 
-        # Load batches
+        # Load batches from index (archived/completed)
         batches = BatchHistoryManager.list_batches(status_filter=status_filter)
+
+        # Also include active batch (not in index yet)
+        active_state = BatchHistoryManager.load_active_batch()
+        if active_state:
+            active_status = active_state.status.value if active_state.status else "active"
+            # Check if filter matches
+            if status_filter is None or active_status == status_filter.value:
+                # Check it's not already in the index
+                active_ids = {b.get("batch_id") for b in batches}
+                if active_state.batch_id not in active_ids:
+                    completed_count = sum(
+                        1 for f in active_state.files if f.status.value == "completed"
+                    )
+                    active_entry = {
+                        "batch_id": active_state.batch_id,
+                        "status": active_status,
+                        "created_at": active_state.created_at.isoformat(),
+                        "completed_at": active_state.completed_at.isoformat() if active_state.completed_at else None,
+                        "total_files": len(active_state.files),
+                        "completed_files": completed_count,
+                        "filename": None,
+                    }
+                    batches.insert(0, active_entry)
 
         if not batches:
             empty_label = ctk.CTkLabel(
