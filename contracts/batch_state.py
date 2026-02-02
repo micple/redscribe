@@ -3,6 +3,7 @@ Pydantic models for batch state persistence.
 
 Models:
     - TranscriptionStatusEnum: File processing status enumeration
+    - BatchStatus: Batch lifecycle status enumeration
     - BatchSettings: Configuration for a batch transcription session
     - FileState: State of a single file in the batch
     - BatchStatistics: Aggregated statistics for the batch
@@ -22,6 +23,14 @@ class TranscriptionStatusEnum(str, Enum):
     COMPLETED = "completed"
     FAILED = "failed"
     SKIPPED = "skipped"
+
+
+class BatchStatus(str, Enum):
+    """Lifecycle status of a batch."""
+    ACTIVE = "active"
+    PAUSED = "paused"
+    COMPLETED = "completed"
+    ARCHIVED = "archived"
 
 
 class BatchSettings(BaseModel):
@@ -62,3 +71,6 @@ class BatchState(BaseModel):
     settings: BatchSettings
     files: List[FileState]
     statistics: BatchStatistics
+    status: BatchStatus = BatchStatus.ACTIVE
+    completed_at: Optional[datetime] = None
+    archived: bool = False

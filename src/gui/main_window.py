@@ -10,7 +10,7 @@ import os
 import time
 import uuid
 from datetime import datetime
-from typing import Optional
+from typing import Optional, List
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 logger = logging.getLogger(__name__)
@@ -34,7 +34,9 @@ from config import (
 )
 from src.utils.api_manager import APIManager
 from src.utils.temp_file_manager import TempFileManager
-from src.utils.batch_state_manager import BatchStateManager
+from src.utils.batch_history_manager import BatchHistoryManager
+from src.utils.batch_state_writer import BatchStateWriter
+from src.utils.migrate_batch_state import migrate_old_batch_state
 from src.core.transcription_orchestrator import TranscriptionOrchestrator
 from src.core.file_scanner import FileScanner
 from src.core.media_converter import MediaConverter, FFmpegNotFoundError
@@ -42,13 +44,14 @@ from src.core.transcription import TranscriptionService
 from src.core.output_writer import OutputWriter
 from src.models.media_file import MediaFile, TranscriptionStatus, ErrorCategory
 from src.core.error_classifier import ErrorClassifier
-from contracts.batch_state import BatchState, BatchSettings, FileState, BatchStatistics
+from contracts.batch_state import BatchState, BatchSettings, FileState, BatchStatistics, TranscriptionStatusEnum
 from src.gui.styles import configure_theme, FONTS, PADDING, COLORS, SPACING, BUTTON_STYLES, DIMENSIONS, Tooltip
 from src.gui.settings_dialog import SettingsDialog
 from src.gui.file_browser_dialog import FileBrowserDialog
 from src.gui.progress_dialog import ProgressDialog
 from src.gui.logs_tab import LogsTab
 from src.gui.youtube_tab import YouTubeTab
+from src.gui.batch_manager_tab import BatchManagerTab
 from src.utils.session_logger import get_logger
 
 
@@ -67,9 +70,13 @@ class MainWindow(ctk.CTk):
         self.output_writer = OutputWriter()
         self.session_logger = get_logger()
         self.temp_manager = TempFileManager(TEMP_DIR)
+        self.batch_writer = BatchStateWriter()
 
         # Cleanup old temporary files from previous sessions
         self._cleanup_temp_files()
+
+        # Migrate old batch_state.json to new structure (one-time operation)
+        migrate_old_batch_state()
 
         # State
         self.selected_directory: Optional[Path] = None
@@ -170,51 +177,94 @@ class MainWindow(ctk.CTk):
             self._open_settings()
 
     def _check_pending_batch(self):
-        """Check for interrupted batch and offer to resume."""
+        """Check for interrupted batch and offer to open Batch Manager."""
         try:
-            if not BatchStateManager.has_pending_batch():
+            if not BatchHistoryManager.has_active_batch():
                 return
 
-            state = BatchStateManager.load_batch_state()
+            state = BatchHistoryManager.load_active_batch()
             if state is None:
-                BatchStateManager.clear_batch_state()
+                BatchHistoryManager.dismiss_active_batch()
                 return
 
             incomplete = sum(1 for f in state.files if f.status.value in ("pending", "failed", "skipped"))
             completed = sum(1 for f in state.files if f.status.value == "completed")
 
             if incomplete == 0:
-                BatchStateManager.clear_batch_state()
+                BatchHistoryManager.dismiss_active_batch()
                 return
 
-            resume = messagebox.askyesno(
-                "Resume Batch",
-                f"Found incomplete batch:\n"
-                f"  {completed} completed, {incomplete} remaining.\n\n"
-                f"Resume transcription?"
+            # Format created date
+            created_str = state.created_at.strftime("%Y-%m-%d %H:%M")
+
+            open_manager = messagebox.askyesno(
+                "Incomplete Batch Found",
+                f"You have an incomplete batch.\n\n"
+                f"Created: {created_str}\n"
+                f"Completed: {completed}\n"
+                f"Remaining: {incomplete}\n\n"
+                f"Open Batch Manager to resume?",
+                icon='question'
             )
 
-            if resume:
-                self._resume_batch(state)
+            if open_manager:
+                # Switch to Batch Manager tab
+                self.tab_selector.set("Batch Manager")
+                self._on_tab_change("Batch Manager")
             else:
-                BatchStateManager.clear_batch_state()
+                # Pause batch and keep in history
+                BatchHistoryManager.pause_batch(state)
         except Exception as e:
             logger.error(f"Error checking pending batch: {e}")
 
-    def _resume_batch(self, state: BatchState):
-        """Resume an interrupted batch."""
-        # Verify completed files still exist
-        missing = BatchStateManager.verify_completed_files(state)
-        if missing:
-            BatchStateManager.mark_files_for_reprocessing(state, missing)
+    def _resume_batch(self, state: BatchState, selected_files: Optional[List[str]] = None):
+        """Resume an interrupted batch.
+
+        Args:
+            state: BatchState to resume.
+            selected_files: Optional list of source_path strings to resume.
+                          If None, resumes all pending/failed files.
+        """
+        # Verify source and output files still exist
+        verification = BatchHistoryManager.verify_batch_files(state)
+        missing_sources = verification["missing_sources"]
+        missing_outputs = verification["missing_outputs"]
+
+        # Handle missing source files
+        if missing_sources:
+            for file_state in state.files:
+                if file_state.source_path in missing_sources:
+                    file_state.status = TranscriptionStatusEnum.SKIPPED
+                    file_state.error_message = "Source file not found"
             messagebox.showwarning(
-                "Missing Files",
-                f"{len(missing)} output file(s) missing and will be reprocessed."
+                "Missing Source Files",
+                f"{len(missing_sources)} source file(s) not found and will be skipped."
+            )
+
+        # Handle missing output files - mark for reprocessing
+        if missing_outputs:
+            for file_state in state.files:
+                if file_state.source_path in missing_outputs:
+                    file_state.status = TranscriptionStatusEnum.PENDING
+                    file_state.output_path = None
+                    file_state.error_message = None
+                    file_state.completed_at = None
+                    # Update statistics
+                    state.statistics.completed -= 1
+                    state.statistics.pending += 1
+            messagebox.showwarning(
+                "Missing Output Files",
+                f"{len(missing_outputs)} output file(s) missing and will be reprocessed."
             )
 
         # Reconstruct selected_files from state
+        # If selected_files list provided, only resume those files
         self.selected_files = []
         for file_state in state.files:
+            # Filter by selected_files if provided
+            if selected_files is not None and file_state.source_path not in selected_files:
+                continue
+
             media_file = MediaFile(Path(file_state.source_path))
             # Map status
             status_map = {
@@ -235,10 +285,30 @@ class MainWindow(ctk.CTk):
             media_file.retry_count = file_state.retry_count
             self.selected_files.append(media_file)
 
-        # Restore settings
+        # Restore ALL settings from batch state
         self.format_var.set(state.settings.output_format)
+        self.diarize_var.set(state.settings.diarize)
 
-        # Update UI
+        # Restore language (map code back to dropdown format)
+        from config import SUPPORTED_LANGUAGES
+        lang_code = state.settings.language
+        if lang_code in SUPPORTED_LANGUAGES:
+            lang_name = SUPPORTED_LANGUAGES[lang_code]
+            self.lang_var.set(f"{lang_name} ({lang_code})")
+
+        # Restore output directory if custom
+        if state.settings.output_dir:
+            self.output_location_var.set("custom")
+            self.output_dir_entry.configure(state="normal")
+            self.output_dir_entry.delete(0, "end")
+            self.output_dir_entry.insert(0, state.settings.output_dir)
+            self.output_browse_btn.configure(state="normal")
+        else:
+            self.output_location_var.set("source")
+            self.output_dir_entry.configure(state="disabled")
+            self.output_browse_btn.configure(state="disabled")
+
+        # Update UI with resume indicator
         count = len(self.selected_files)
         if count > 0:
             total_size = sum(f.size_bytes for f in self.selected_files)
@@ -251,10 +321,37 @@ class MainWindow(ctk.CTk):
         self.current_batch_id = state.batch_id
         self._update_start_button()
 
+        # Show temporary resume indicator
+        self._show_resume_indicator()
+
         logger.info(f"Resumed batch {state.batch_id} with {len(self.selected_files)} files")
 
         # Start transcription automatically after resume
         self.after(100, self._start_transcription)
+
+    def _show_resume_indicator(self):
+        """Show temporary UI indicator that batch was resumed with settings restored."""
+        # Create indicator label
+        indicator = ctk.CTkLabel(
+            self.main_tab_frame,
+            text="⚠️ Resumed batch - settings restored from previous session",
+            font=FONTS["small"],
+            text_color=COLORS["warning"],
+            fg_color=COLORS["surface_elevated"],
+            corner_radius=6,
+            padx=PADDING["medium"],
+            pady=PADDING["small"],
+        )
+        indicator.grid(row=5, column=0, sticky="ew", pady=(0, SPACING["sm"]))
+
+        # Remove after 5 seconds or when transcription starts
+        def remove_indicator():
+            try:
+                indicator.destroy()
+            except:
+                pass
+
+        self.after(5000, remove_indicator)
 
     def _create_widgets(self):
         """Create main window widgets using grid layout.
@@ -271,6 +368,7 @@ class MainWindow(ctk.CTk):
         self._create_output_section()
         self._create_action_buttons()
         self._create_youtube_tab()
+        self._create_batch_manager_tab()
         self._create_logs_tab()
 
     def _setup_layout(self):
@@ -306,7 +404,7 @@ class MainWindow(ctk.CTk):
 
         self.tab_selector = ctk.CTkSegmentedButton(
             top_bar,
-            values=["Main", "YouTube", "Logs"],
+            values=["Main", "YouTube", "Batch Manager", "Logs"],
             command=self._on_tab_change,
             fg_color=COLORS["surface"],
             selected_color=COLORS["primary"],
@@ -343,9 +441,9 @@ class MainWindow(ctk.CTk):
         self.credits_tooltip = None
 
     def _create_tab_frames(self):
-        """Create the main, YouTube, and logs tab frames.
+        """Create the main, YouTube, batch manager, and logs tab frames.
 
-        Sets up the three content frames that are shown/hidden
+        Sets up the four content frames that are shown/hidden
         when the user switches tabs via the segmented button.
         """
         self.main_tab_frame = ctk.CTkFrame(self._content_container, fg_color=COLORS["background"])
@@ -354,6 +452,10 @@ class MainWindow(ctk.CTk):
         self.youtube_tab_frame = ctk.CTkFrame(self._content_container, fg_color=COLORS["background"])
         self.youtube_tab_frame.grid(row=0, column=0, sticky="nsew")
         self.youtube_tab_frame.grid_remove()
+
+        self.batch_manager_tab_frame = ctk.CTkFrame(self._content_container, fg_color=COLORS["background"])
+        self.batch_manager_tab_frame.grid(row=0, column=0, sticky="nsew")
+        self.batch_manager_tab_frame.grid_remove()
 
         self.logs_tab_frame = ctk.CTkFrame(self._content_container, fg_color=COLORS["background"])
         self.logs_tab_frame.grid(row=0, column=0, sticky="nsew")
@@ -659,6 +761,21 @@ class MainWindow(ctk.CTk):
         )
         self.youtube_tab.grid(row=0, column=0, sticky="nsew")
 
+    def _create_batch_manager_tab(self):
+        """Create the Batch Manager tab content.
+
+        Initializes the BatchManagerTab widget inside the batch_manager_tab_frame.
+        """
+        self.batch_manager_tab_frame.grid_columnconfigure(0, weight=1)
+        self.batch_manager_tab_frame.grid_rowconfigure(0, weight=1)
+
+        self.batch_manager_tab = BatchManagerTab(
+            self.batch_manager_tab_frame,
+            api_manager=self.api_manager,
+            main_window=self,
+        )
+        self.batch_manager_tab.grid(row=0, column=0, sticky="nsew")
+
     def _create_logs_tab(self):
         """Create the Logs tab content.
 
@@ -680,6 +797,7 @@ class MainWindow(ctk.CTk):
         # Hide all tabs
         self.main_tab_frame.grid_remove()
         self.youtube_tab_frame.grid_remove()
+        self.batch_manager_tab_frame.grid_remove()
         self.logs_tab_frame.grid_remove()
 
         # Show selected tab
@@ -687,6 +805,8 @@ class MainWindow(ctk.CTk):
             self.main_tab_frame.grid()
         elif selected_tab == "YouTube":
             self.youtube_tab_frame.grid()
+        elif selected_tab == "Batch Manager":
+            self.batch_manager_tab_frame.grid()
         else:  # Logs
             self.logs_tab_frame.grid()
 
@@ -988,7 +1108,7 @@ class MainWindow(ctk.CTk):
                 pending=len(self.selected_files),
             ),
         )
-        BatchStateManager.save_batch_state(batch_state)
+        BatchHistoryManager.save_active_batch(batch_state)
 
         # Create progress dialog
         self.progress_dialog = ProgressDialog(
@@ -1016,13 +1136,46 @@ class MainWindow(ctk.CTk):
         self._scan_directory()
         self._refresh_credits()
 
+        # Flush pending writes before archiving/clearing
+        if self.current_batch_id:
+            self.batch_writer.flush(timeout=5.0)
+
+        # If cancelled/paused, show info dialog
+        if self.current_batch_id and self.cancel_event.is_set():
+            self._on_batch_cancelled()
+
         # Clear batch state if dialog is closed
         # (Keep it if there are failed files for potential resume)
         if self.current_batch_id:
             has_failed = any(f.status == TranscriptionStatus.FAILED for f in self.selected_files)
             if not has_failed:
-                BatchStateManager.clear_batch_state()
+                BatchHistoryManager.dismiss_active_batch()
                 self.current_batch_id = None
+
+    def _on_batch_cancelled(self):
+        """Show info dialog after batch is cancelled/paused."""
+        try:
+            # Count completed and remaining
+            completed = sum(1 for f in self.selected_files if f.status == TranscriptionStatus.COMPLETED)
+            remaining = sum(1 for f in self.selected_files if f.status in (TranscriptionStatus.PENDING, TranscriptionStatus.FAILED, TranscriptionStatus.SKIPPED))
+
+            if remaining > 0:
+                # Pause the batch
+                state = BatchHistoryManager.load_active_batch()
+                if state:
+                    BatchHistoryManager.pause_batch(state)
+
+                # Show info dialog
+                messagebox.showinfo(
+                    "Batch Paused",
+                    f"Batch Paused\n\n"
+                    f"✓ {completed} completed\n"
+                    f"○ {remaining} remaining\n\n"
+                    f"You can resume later from Batch Manager tab.",
+                    icon='info'
+                )
+        except Exception as e:
+            logger.error(f"Error in _on_batch_cancelled: {e}")
 
     def _process_files(self, api_key: str, converter: MediaConverter):
         """Process files in background thread with automatic retry using parallel workers."""
@@ -1171,9 +1324,16 @@ class MainWindow(ctk.CTk):
                 success_count, fail_count, failed_files, self._retry_failed_files
             ))
 
-        # Clear batch state after completion
+        # Complete and archive batch after successful completion
         if self.current_batch_id and not self.cancel_event.is_set():
-            BatchStateManager.clear_batch_state()
+            self.batch_writer.flush(timeout=5.0)  # Ensure all writes complete
+            try:
+                state = BatchHistoryManager.load_active_batch()
+                if state:
+                    BatchHistoryManager.complete_batch(state)
+                    logger.info(f"Batch {self.current_batch_id} completed and archived")
+            except Exception as e:
+                logger.error(f"Failed to complete batch: {e}")
             self.current_batch_id = None
 
     def _process_single_file(
@@ -1233,16 +1393,26 @@ class MainWindow(ctk.CTk):
             self.after(0, lambda idx=index: self.progress_dialog.update_file_status(
                 idx, TranscriptionStatus.COMPLETED, "Done"
             ))
-            # Update batch state
+            # Update batch state via async writer
             if self.current_batch_id:
                 try:
-                    BatchStateManager.update_file_status(
-                        batch_id=self.current_batch_id,
-                        source_path=str(file.path),
-                        status="completed",
-                        output_path=str(extra.get("output_path", "")),
-                        duration_seconds=extra.get("duration_seconds"),
-                    )
+                    state = BatchHistoryManager.load_active_batch()
+                    if state and state.batch_id == self.current_batch_id:
+                        # Update file state
+                        for file_state in state.files:
+                            if file_state.source_path == str(file.path):
+                                file_state.status = TranscriptionStatusEnum.COMPLETED
+                                file_state.output_path = str(extra.get("output_path", ""))
+                                file_state.duration_seconds = extra.get("duration_seconds")
+                                file_state.completed_at = datetime.now()
+                                # Update statistics
+                                state.statistics.completed += 1
+                                state.statistics.pending -= 1
+                                if file_state.duration_seconds:
+                                    state.statistics.total_duration_seconds += file_state.duration_seconds
+                                break
+                        # Schedule async write (non-blocking)
+                        self.batch_writer.schedule_write(state)
                 except Exception as e:
                     logger.error(f"Failed to update batch state: {e}")
         elif event_type == "failed":
@@ -1250,15 +1420,22 @@ class MainWindow(ctk.CTk):
             self.after(0, lambda idx=index, m=msg: self.progress_dialog.update_file_status(
                 idx, TranscriptionStatus.FAILED, m
             ))
-            # Update batch state
+            # Update batch state via async writer
             if self.current_batch_id:
                 try:
-                    BatchStateManager.update_file_status(
-                        batch_id=self.current_batch_id,
-                        source_path=str(file.path),
-                        status="failed",
-                        error_message=str(extra.get("error", "")),
-                    )
+                    state = BatchHistoryManager.load_active_batch()
+                    if state and state.batch_id == self.current_batch_id:
+                        # Update file state
+                        for file_state in state.files:
+                            if file_state.source_path == str(file.path):
+                                file_state.status = TranscriptionStatusEnum.FAILED
+                                file_state.error_message = str(extra.get("error", ""))
+                                # Update statistics
+                                state.statistics.failed += 1
+                                state.statistics.pending -= 1
+                                break
+                        # Schedule async write (non-blocking)
+                        self.batch_writer.schedule_write(state)
                 except Exception as e:
                     logger.error(f"Failed to update batch state: {e}")
 
@@ -1342,9 +1519,16 @@ class MainWindow(ctk.CTk):
             total_success, total_failed, failed_files, self._retry_failed_files
         ))
 
-        # Clear batch state after retry completion if no failures
+        # Complete and archive batch after retry if no failures
         if self.current_batch_id and total_failed == 0:
-            BatchStateManager.clear_batch_state()
+            self.batch_writer.flush(timeout=5.0)  # Ensure all writes complete
+            try:
+                state = BatchHistoryManager.load_active_batch()
+                if state:
+                    BatchHistoryManager.complete_batch(state)
+                    logger.info(f"Batch {self.current_batch_id} completed after retry and archived")
+            except Exception as e:
+                logger.error(f"Failed to complete batch after retry: {e}")
             self.current_batch_id = None
 
     def _cleanup_temp_files(self) -> None:

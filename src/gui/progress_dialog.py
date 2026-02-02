@@ -136,9 +136,9 @@ class ProgressDialog(ctk.CTkToplevel):
 
         self.warning_label = ctk.CTkLabel(
             self._main_frame,
-            text="Do not close the window - this will cancel the transcription process",
+            text="Closing will pause the batch. You can resume later from Batch Manager tab.",
             font=FONTS["small"],
-            text_color=COLORS["warning"],
+            text_color=COLORS["info"],
         )
         self.warning_label.pack(pady=(0, PADDING["small"]))
 

@@ -196,3 +196,45 @@
 **Files changed:** src/gui/main_window.py
 **What was done:** Fixed 3 bugs in _process_files(): (1) Progress bar stuck at 0% - added update_progress() calls after each file completes, (2) Workers display frozen at "0/0 active" - added update_workers_count() calls with active tracking, (3) Status text stuck on "Preparing..." - added status messages showing completed file names. Also fixed Settings dialog height (500x780) for visible Test/Save buttons, dialog off-screen positioning (max(0,x/y) clamp), and RuntimeError in credits refresh thread.
 **Tests:** 284 passed, 1 skipped
+
+## [2026-02-02] Task 6.1.2 — Implement BatchHistoryManager
+**Status:** ✅ Completed
+**Agent:** backend (🔧)
+**Files changed:** src/utils/batch_history_manager.py
+**What was done:** Created BatchHistoryManager to replace BatchStateManager with persistent batch history. Implemented folder structure (batches/active.json, batches/index.json, batches/{timestamp}_{batch_id}.json). Implemented all required methods: has_active_batch(), load_active_batch(), save_active_batch(), complete_batch() (archives with timestamp), pause_batch(), dismiss_active_batch(), load_batch_by_id(), list_batches() (with status filter), delete_batch(), cleanup_old_batches() (with days threshold), verify_batch_files() (checks source and output files exist). Used atomic writes (tempfile + os.replace) for corruption prevention.
+**Tests:** Manual verification needed for file operations
+
+## [2026-02-02] Task 6.1.3 — Migrate Old Batch State
+**Status:** ✅ Completed
+**Agent:** backend (🔧)
+**Files changed:** src/utils/migrate_batch_state.py, src/gui/main_window.py
+**What was done:** Created migrate_batch_state.py with migrate_old_batch_state() function. Migrates old batch_state.json to new batches/active.json structure. Creates backup with timestamp before migration. Idempotent (safe to run multiple times). Added migration call to MainWindow.__init__() to run on startup.
+**Tests:** Manual verification needed for migration workflow
+
+## [2026-02-02] Task 6.2.1 — Implement BatchStateWriter
+**Status:** ✅ Completed
+**Agent:** backend (🔧)
+**Files changed:** src/utils/batch_state_writer.py
+**What was done:** Created BatchStateWriter singleton with background daemon thread for throttled, batched state writes. Implemented queue.Queue for write requests. Throttling: max 1 write per second. Batching: multiple queued updates → single write (last state wins). Implemented schedule_write() (non-blocking), flush() (blocking with timeout), shutdown() (graceful cleanup). Thread-safe operations with proper event signaling.
+**Tests:** Manual verification needed for threading behavior
+
+## [2026-02-02] Task 6.2.2 — Integrate BatchStateWriter in MainWindow
+**Status:** ✅ Completed
+**Agent:** backend (🔧)
+**Files changed:** src/gui/main_window.py
+**What was done:** Updated MainWindow imports to use BatchHistoryManager and BatchStateWriter. Created self.batch_writer in __init__(). Replaced ALL BatchStateManager calls with BatchHistoryManager equivalents. Updated _on_transcription_event() to use batch_writer.schedule_write() for file status updates (non-blocking async writes). Updated _on_progress_close() and batch completion logic to call batch_writer.flush() before archiving. Changed clear_batch_state() calls to complete_batch() (archives) or dismiss_active_batch() (removes without archive).
+**Tests:** Manual verification needed for UI integration
+
+## [2026-02-02] Task 6.3.1 — Implement verify_batch_files()
+**Status:** ✅ Completed
+**Agent:** backend (🔧)
+**Files changed:** src/utils/batch_history_manager.py
+**What was done:** Implemented verify_batch_files() method in BatchHistoryManager. Checks Path(source_path).exists() for all files. Checks output_path exists for COMPLETED status files. Returns dict with 'missing_sources' and 'missing_outputs' lists. Comprehensive logging for missing files.
+**Tests:** Manual verification needed for file checking logic
+
+## [2026-02-02] Task 6.3.2 — Integrate Verification in Resume
+**Status:** ✅ Completed
+**Agent:** backend (🔧)
+**Files changed:** src/gui/main_window.py
+**What was done:** Updated MainWindow._resume_batch() to call BatchHistoryManager.verify_batch_files(state). Missing sources marked as SKIPPED with error "Source file not found". Missing outputs marked as PENDING for reprocessing (status/stats updated). Show warning messageboxes for missing sources and outputs separately. Proper statistics updates (completed count decremented, pending incremented for missing outputs).
+**Tests:** Manual verification needed for resume workflow

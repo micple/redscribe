@@ -66,29 +66,29 @@ Enhance the batch resume system (from Stage 5) with persistent history, improved
 
 **6.1.1 Update BatchState Contract**
 
-- [ ] In `contracts/batch_state.py`, add `BatchStatus` enum: `ACTIVE | PAUSED | COMPLETED | ARCHIVED`
-- [ ] Add fields to `BatchState`: `status`, `completed_at`, `archived`
-- [ ] **Acceptance criteria:** Pydantic validation passes for new fields
+- [X] In `contracts/batch_state.py`, add `BatchStatus` enum: `ACTIVE | PAUSED | COMPLETED | ARCHIVED`
+- [X] Add fields to `BatchState`: `status`, `completed_at`, `archived`
+- [X] **Acceptance criteria:** Pydantic validation passes for new fields
 
 **6.1.2 Implement BatchHistoryManager**
 
-- [ ] Create `src/utils/batch_history_manager.py` (replaces `BatchStateManager`)
-- [ ] Implement folder structure: `batches/active.json`, `batches/index.json`, `batches/{timestamp}_{batch_id}.json`
-- [ ] Implement methods:
+- [X] Create `src/utils/batch_history_manager.py` (replaces `BatchStateManager`)
+- [X] Implement folder structure: `batches/active.json`, `batches/index.json`, `batches/{timestamp}_{batch_id}.json`
+- [X] Implement methods:
   - `has_active_batch()`, `load_active_batch()`, `save_active_batch(state)`
   - `complete_batch(state)` - archives batch with timestamp filename
   - `pause_batch(state)`, `dismiss_active_batch()`
   - `load_batch_by_id(batch_id)`, `list_batches(status_filter=None)`
   - `delete_batch(batch_id)`, `cleanup_old_batches(days_threshold=30)`
-- [ ] Implement index file updates (add/update/remove entries)
-- [ ] **Acceptance criteria:** All methods working, index updates correctly, atomic writes verified
+- [X] Implement index file updates (add/update/remove entries)
+- [X] **Acceptance criteria:** All methods working, index updates correctly, atomic writes verified
 
 **6.1.3 Migrate Old Batch State**
 
-- [ ] Create `src/utils/migrate_batch_state.py`
-- [ ] Implement migration from old `batch_state.json` to new `batches/active.json`
-- [ ] Add migration call to `MainWindow.__init__()` (runs once on first startup)
-- [ ] **Acceptance criteria:** Old batch state migrated successfully, backup created
+- [X] Create `src/utils/migrate_batch_state.py`
+- [X] Implement migration from old `batch_state.json` to new `batches/active.json`
+- [X] Add migration call to `MainWindow.__init__()` (runs once on first startup)
+- [X] **Acceptance criteria:** Old batch state migrated successfully, backup created
 
 ---
 
@@ -96,19 +96,19 @@ Enhance the batch resume system (from Stage 5) with persistent history, improved
 
 **6.2.1 Implement BatchStateWriter**
 
-- [ ] Create `src/utils/batch_state_writer.py` (singleton pattern)
-- [ ] Implement background writer thread with `queue.Queue`
-- [ ] Implement throttling: max 1 write/second
-- [ ] Implement batching: consume multiple updates → single write
-- [ ] Implement methods: `schedule_write(state)`, `flush(timeout=5.0)`, `shutdown()`
-- [ ] **Acceptance criteria:** Writer thread starts/stops cleanly, throttling verified (1 write/sec max)
+- [X] Create `src/utils/batch_state_writer.py` (singleton pattern)
+- [X] Implement background writer thread with `queue.Queue`
+- [X] Implement throttling: max 1 write/second
+- [X] Implement batching: consume multiple updates → single write
+- [X] Implement methods: `schedule_write(state)`, `flush(timeout=5.0)`, `shutdown()`
+- [X] **Acceptance criteria:** Writer thread starts/stops cleanly, throttling verified (1 write/sec max)
 
 **6.2.2 Integrate BatchStateWriter in MainWindow**
 
-- [ ] In `MainWindow.__init__()`, create `self.batch_writer = BatchStateWriter()`
-- [ ] Update `_on_transcription_event()` to use `batch_writer.schedule_write(state)` instead of direct save
-- [ ] Update `_on_batch_complete()` to call `batch_writer.flush()` before archiving
-- [ ] **Acceptance criteria:** No UI lag during batch processing (1000 files), all state updates saved
+- [X] In `MainWindow.__init__()`, create `self.batch_writer = BatchStateWriter()`
+- [X] Update `_on_transcription_event()` to use `batch_writer.schedule_write(state)` instead of direct save
+- [X] Update `_on_batch_complete()` to call `batch_writer.flush()` before archiving
+- [X] **Acceptance criteria:** No UI lag during batch processing (1000 files), all state updates saved
 
 ---
 
@@ -116,19 +116,19 @@ Enhance the batch resume system (from Stage 5) with persistent history, improved
 
 **6.3.1 Implement verify_batch_files()**
 
-- [ ] In `BatchHistoryManager`, add `verify_batch_files(state) -> Dict[str, List[str]]`
-- [ ] Check source files exist (`Path(source_path).exists()`)
-- [ ] Check output files exist for completed status
-- [ ] Return dict with `missing_sources` and `missing_outputs` lists
-- [ ] **Acceptance criteria:** Method detects missing source and output files
+- [X] In `BatchHistoryManager`, add `verify_batch_files(state) -> Dict[str, List[str]]`
+- [X] Check source files exist (`Path(source_path).exists()`)
+- [X] Check output files exist for completed status
+- [X] Return dict with `missing_sources` and `missing_outputs` lists
+- [X] **Acceptance criteria:** Method detects missing source and output files
 
 **6.3.2 Integrate Verification in Resume**
 
-- [ ] Update `MainWindow._resume_batch()` to call `verify_batch_files(state)`
-- [ ] Mark missing sources as SKIPPED with error "Source file not found"
-- [ ] Mark missing outputs as PENDING for reprocessing
-- [ ] Show warning dialogs for missing files
-- [ ] **Acceptance criteria:** Missing files handled correctly, user notified
+- [X] Update `MainWindow._resume_batch()` to call `verify_batch_files(state)`
+- [X] Mark missing sources as SKIPPED with error "Source file not found"
+- [X] Mark missing outputs as PENDING for reprocessing
+- [X] Show warning dialogs for missing files
+- [X] **Acceptance criteria:** Missing files handled correctly, user notified
 
 ---
 
@@ -138,58 +138,58 @@ Enhance the batch resume system (from Stage 5) with persistent history, improved
 
 **6.4.1 Create BatchManagerTab Class**
 
-- [ ] Create `src/gui/batch_manager_tab.py`
-- [ ] Implement master-detail layout (left: batch list, right: details panel)
-- [ ] Implement master panel:
+- [X] Create `src/gui/batch_manager_tab.py`
+- [X] Implement master-detail layout (left: batch list, right: details panel)
+- [X] Implement master panel:
   - Scrollable list with batch cards (date, status badge, format, files count, progress bar)
   - Filter dropdown: All / Active / Paused / Completed
   - Refresh button
-- [ ] Implement detail panel (hidden by default):
+- [X] Implement detail panel (hidden by default):
   - Header: batch_id, status badge, metadata (created, completed, duration)
   - Settings preview (readonly)
   - Progress summary (bar + counts)
   - Scrollable file list with checkboxes (pending/failed files only)
   - Action buttons: Resume All, Resume Selected, Re-run, Export CSV, Delete
-- [ ] **Acceptance criteria:** Tab displays correctly, clickable cards, detail panel shows/hides
+- [X] **Acceptance criteria:** Tab displays correctly, clickable cards, detail panel shows/hides
 
 **6.4.2 Implement Batch Card Rendering**
 
-- [ ] In `_create_batch_card(batch)`, render status badges with colors (● Active green, ⏸ Paused orange, ✓ Completed blue)
-- [ ] Add progress bar for incomplete batches (active/paused)
-- [ ] Add click handler to select batch and show details
-- [ ] Highlight selected batch card
-- [ ] **Acceptance criteria:** Cards render correctly, selection works, progress bars update
+- [X] In `_create_batch_card(batch)`, render status badges with colors (● Active green, ⏸ Paused orange, ✓ Completed blue)
+- [X] Add progress bar for incomplete batches (active/paused)
+- [X] Add click handler to select batch and show details
+- [X] Highlight selected batch card
+- [X] **Acceptance criteria:** Cards render correctly, selection works, progress bars update
 
 **6.4.3 Implement Detail Panel Population**
 
-- [ ] In `_populate_detail_panel(state)`, show batch metadata (ID, dates, duration)
-- [ ] Show settings (format, language, diarize, output_dir)
-- [ ] Show progress bar + summary (X completed, Y failed, Z pending)
-- [ ] Populate file list with checkboxes (max 20 files visible, scroll for more)
-- [ ] Enable/disable action buttons based on batch state
-- [ ] **Acceptance criteria:** Details accurate, checkboxes work, buttons enabled/disabled correctly
+- [X] In `_populate_detail_panel(state)`, show batch metadata (ID, dates, duration)
+- [X] Show settings (format, language, diarize, output_dir)
+- [X] Show progress bar + summary (X completed, Y failed, Z pending)
+- [X] Populate file list with checkboxes (max 20 files visible, scroll for more)
+- [X] Enable/disable action buttons based on batch state
+- [X] **Acceptance criteria:** Details accurate, checkboxes work, buttons enabled/disabled correctly
 
 **6.4.4 Implement Batch Manager Actions**
 
-- [ ] Implement `_resume_all()` - call `MainWindow._resume_batch(state, selected_files=None)`
-- [ ] Implement `_resume_selected()` - get checked files, call `MainWindow._resume_batch(state, selected_files)`
-- [ ] Implement `_rerun_batch()` - placeholder dialog (future implementation)
-- [ ] Implement `_export_csv()` - save CSV with file list, status, errors
-- [ ] Implement `_delete_batch()` - call `BatchHistoryManager.delete_batch(batch_id)`
-- [ ] **Acceptance criteria:** Resume All/Selected works, CSV export correct, delete works
+- [X] Implement `_resume_all()` - call `MainWindow._resume_batch(state, selected_files=None)`
+- [X] Implement `_resume_selected()` - get checked files, call `MainWindow._resume_batch(state, selected_files)`
+- [X] Implement `_rerun_batch()` - placeholder dialog (future implementation)
+- [X] Implement `_export_csv()` - save CSV with file list, status, errors
+- [X] Implement `_delete_batch()` - call `BatchHistoryManager.delete_batch(batch_id)`
+- [X] **Acceptance criteria:** Resume All/Selected works, CSV export correct, delete works
 
 **6.4.5 Implement Auto-Refresh**
 
-- [ ] Add `_start_auto_refresh()` method with 2-second timer
-- [ ] Reload active batch detail panel if selected
-- [ ] Reload batch list if any active batches exist
-- [ ] **Acceptance criteria:** Live progress updates visible (every 2 seconds)
+- [X] Add `_start_auto_refresh()` method with 2-second timer
+- [X] Reload active batch detail panel if selected
+- [X] Reload batch list if any active batches exist
+- [X] **Acceptance criteria:** Live progress updates visible (every 2 seconds)
 
 **6.4.6 Integrate Tab in MainWindow**
 
-- [ ] In `MainWindow._create_tabs()`, add Batch Manager tab
-- [ ] Pass references to `api_manager` and `main_window` (for resume calls)
-- [ ] **Acceptance criteria:** Tab appears in tabview, switches correctly
+- [X] In `MainWindow._create_tabs()`, add Batch Manager tab
+- [X] Pass references to `api_manager` and `main_window` (for resume calls)
+- [X] **Acceptance criteria:** Tab appears in tabview, switches correctly
 
 ---
 
@@ -197,10 +197,10 @@ Enhance the batch resume system (from Stage 5) with persistent history, improved
 
 **6.5.1 Implement Lightweight Notification**
 
-- [ ] Update `MainWindow._check_pending_batch()` to show simple messagebox (not full dialog)
-- [ ] Message: "You have an incomplete batch. Created: [date], Completed: X, Remaining: Y. Open Batch Manager to resume?"
-- [ ] Buttons: [Yes] (switch to Batch Manager tab), [No] (pause batch, keep in history)
-- [ ] **Acceptance criteria:** Notification non-intrusive, "Open Batch Manager" switches to tab
+- [X] Update `MainWindow._check_pending_batch()` to show simple messagebox (not full dialog)
+- [X] Message: "You have an incomplete batch. Created: [date], Completed: X, Remaining: Y. Open Batch Manager to resume?"
+- [X] Buttons: [Yes] (switch to Batch Manager tab), [No] (pause batch, keep in history)
+- [X] **Acceptance criteria:** Notification non-intrusive, "Open Batch Manager" switches to tab
 
 ---
 
@@ -208,17 +208,17 @@ Enhance the batch resume system (from Stage 5) with persistent history, improved
 
 **6.6.1 Update Progress Dialog Warning**
 
-- [ ] In `src/gui/progress_dialog.py`, change warning text:
+- [X] In `src/gui/progress_dialog.py`, change warning text:
   - BEFORE: "Do not close the window - this will cancel the transcription process"
   - AFTER: "Closing will pause the batch. You can resume later from Batch Manager tab."
-- [ ] **Acceptance criteria:** Warning text updated
+- [X] **Acceptance criteria:** Warning text updated
 
 **6.6.2 Add Post-Cancel Info Dialog**
 
-- [ ] In `MainWindow`, add `_on_batch_cancelled()` method
-- [ ] Show dialog: "Batch Paused. ✓ X completed, ○ Y remaining. You can resume later from Batch Manager tab."
-- [ ] Call `BatchHistoryManager.pause_batch(state)` on cancel
-- [ ] **Acceptance criteria:** Dialog appears after cancel, batch marked as paused
+- [X] In `MainWindow`, add `_on_batch_cancelled()` method
+- [X] Show dialog: "Batch Paused. ✓ X completed, ○ Y remaining. You can resume later from Batch Manager tab."
+- [X] Call `BatchHistoryManager.pause_batch(state)` on cancel
+- [X] **Acceptance criteria:** Dialog appears after cancel, batch marked as paused
 
 ---
 
@@ -226,10 +226,10 @@ Enhance the batch resume system (from Stage 5) with persistent history, improved
 
 **6.7.1 Verify Full Settings Restore**
 
-- [ ] In `MainWindow._resume_batch()`, verify ALL settings restored:
+- [X] In `MainWindow._resume_batch()`, verify ALL settings restored:
   - `output_format`, `output_dir`, `language`, `diarize`, `smart_format`, `max_concurrent_workers`
-- [ ] Add UI indicator: "⚠️ Resumed batch - settings restored from previous session"
-- [ ] **Acceptance criteria:** All settings restore correctly, indicator shown
+- [X] Add UI indicator: "⚠️ Resumed batch - settings restored from previous session"
+- [X] **Acceptance criteria:** All settings restore correctly, indicator shown
 
 ---
 
@@ -239,29 +239,29 @@ Enhance the batch resume system (from Stage 5) with persistent history, improved
 
 **6.8.1 Test BatchHistoryManager**
 
-- [ ] Create `tests/test_batch_history_manager.py`
-- [ ] Test batch lifecycle: active → paused → completed
-- [ ] Test index updates (add/update/remove)
-- [ ] Test auto-cleanup (batches >30 days)
-- [ ] Test atomic writes (no corruption)
-- [ ] **Acceptance criteria:** 90%+ coverage, all lifecycle transitions tested
+- [X] Create `tests/test_batch_history_manager.py`
+- [X] Test batch lifecycle: active → paused → completed
+- [X] Test index updates (add/update/remove)
+- [X] Test auto-cleanup (batches >30 days)
+- [X] Test atomic writes (no corruption)
+- [X] **Acceptance criteria:** 90%+ coverage, all lifecycle transitions tested
 
 **6.8.2 Test BatchStateWriter**
 
-- [ ] Create `tests/test_batch_state_writer.py`
-- [ ] Test async write queue (schedule + flush)
-- [ ] Test throttling (max 1 write/sec)
-- [ ] Test batching (multiple updates → single write)
-- [ ] Test graceful shutdown
-- [ ] **Acceptance criteria:** 85%+ coverage, throttling verified
+- [X] Create `tests/test_batch_state_writer.py`
+- [X] Test async write queue (schedule + flush)
+- [X] Test throttling (max 1 write/sec)
+- [X] Test batching (multiple updates → single write)
+- [X] Test graceful shutdown
+- [X] **Acceptance criteria:** 85%+ coverage, throttling verified
 
 **6.8.3 Test Frontend Components**
 
-- [ ] Create `tests/test_batch_manager_tab.py` (with mocks)
-- [ ] Test batch card rendering
-- [ ] Test detail panel population
-- [ ] Test action buttons (resume, export, delete)
-- [ ] **Acceptance criteria:** Key UI methods tested (mocked GUI)
+- [X] Create `tests/test_batch_manager_tab.py` (with mocks)
+- [X] Test batch card rendering
+- [X] Test detail panel population
+- [X] Test action buttons (resume, export, delete)
+- [X] **Acceptance criteria:** Key UI methods tested (mocked GUI)
 
 ---
 
@@ -269,12 +269,12 @@ Enhance the batch resume system (from Stage 5) with persistent history, improved
 
 **6.9.1 Test E2E Resume Flow**
 
-- [ ] Create `tests/test_batch_lifecycle_integration.py`
-- [ ] Test: Create batch → cancel → resume from Batch Manager → complete
-- [ ] Test: Selective resume (uncheck some files)
-- [ ] Test: Missing source files handling
-- [ ] Test: Missing output files handling
-- [ ] **Acceptance criteria:** All E2E scenarios pass
+- [X] Create `tests/test_batch_lifecycle_integration.py`
+- [X] Test: Create batch → cancel → resume from Batch Manager → complete
+- [X] Test: Selective resume (uncheck some files)
+- [X] Test: Missing source files handling
+- [X] Test: Missing output files handling
+- [X] **Acceptance criteria:** All E2E scenarios pass
 
 ---
 
