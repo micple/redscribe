@@ -199,6 +199,8 @@ class FileBrowserDialog(ctk.CTkToplevel):
         self.update_idletasks()
         x = parent.winfo_x() + (parent.winfo_width() - 700) // 2
         y = parent.winfo_y() + (parent.winfo_height() - 550) // 2
+        x = max(0, x)
+        y = max(0, y)
         self.geometry(f"+{x}+{y}")
 
         self._create_widgets()
