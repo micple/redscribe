@@ -46,7 +46,7 @@ class ProgressDialog(ctk.CTkToplevel):
 
         # Window configuration
         self.title("Transcription in Progress")
-        self.geometry("650x550")
+        self.geometry("650x750")
         self.resizable(False, False)
         self.transient(parent)
         self.grab_set()
@@ -55,7 +55,7 @@ class ProgressDialog(ctk.CTkToplevel):
         # Center on parent
         self.update_idletasks()
         x = parent.winfo_x() + (parent.winfo_width() - 650) // 2
-        y = parent.winfo_y() + (parent.winfo_height() - 550) // 2
+        y = parent.winfo_y() + (parent.winfo_height() - 750) // 2
         x = max(0, x)
         y = max(0, y)
         self.geometry(f"+{x}+{y}")
@@ -73,8 +73,8 @@ class ProgressDialog(ctk.CTkToplevel):
         self._main_frame.pack(fill="both", expand=True, padx=PADDING["large"], pady=PADDING["large"])
 
         self._create_overall_progress()
-        self._create_file_list()
         self._create_control_buttons()
+        self._create_file_list()
 
     def _create_overall_progress(self):
         """Create the overall progress section.
@@ -159,7 +159,7 @@ class ProgressDialog(ctk.CTkToplevel):
             - Each row has: status icon, file name, status detail label
         """
         list_frame = ctk.CTkFrame(self._main_frame, fg_color="transparent")
-        list_frame.pack(fill="x", pady=PADDING["medium"])
+        list_frame.pack(fill="both", expand=True, pady=PADDING["medium"])
 
         list_label = ctk.CTkLabel(
             list_frame,
@@ -173,9 +173,8 @@ class ProgressDialog(ctk.CTkToplevel):
             list_frame,
             fg_color=COLORS["surface"],
             corner_radius=8,
-            height=120,
         )
-        self.file_list.pack(fill="x", pady=(PADDING["small"], 0))
+        self.file_list.pack(fill="both", expand=True, pady=(PADDING["small"], 0))
 
         self.file_status_labels = []
         for file in self.files:
@@ -225,7 +224,7 @@ class ProgressDialog(ctk.CTkToplevel):
             - Retry button placeholder (created dynamically when needed)
         """
         self.buttons_frame = ctk.CTkFrame(self._main_frame, fg_color="transparent")
-        self.buttons_frame.pack(fill="x", pady=(PADDING["medium"], 0))
+        self.buttons_frame.pack(side="bottom", fill="x", pady=(PADDING["medium"], 0))
 
         self.retry_btn = None
 
@@ -241,13 +240,16 @@ class ProgressDialog(ctk.CTkToplevel):
 
         self.cancel_btn = ctk.CTkButton(
             self.buttons_frame,
-            text="Cancel",
-            width=100,
+            text="Stop Transcription",
+            width=250,
+            height=38,
             fg_color=COLORS["error"],
+            hover_color="#c0392b",
             text_color="#FFFFFF",
+            font=FONTS["body"],
             command=self._on_cancel_click,
         )
-        self.cancel_btn.pack(side="right")
+        self.cancel_btn.pack(pady=(4, 0))
 
         self.close_btn = ctk.CTkButton(
             self.buttons_frame,
@@ -475,8 +477,8 @@ class ProgressDialog(ctk.CTkToplevel):
             self.retry_btn.pack_forget()
         self.open_folder_btn.pack_forget()
         self.close_btn.pack_forget()
-        self.cancel_btn.configure(state="normal", text="Cancel")
-        self.cancel_btn.pack(side="right")
+        self.cancel_btn.configure(state="normal", text="Stop Transcription")
+        self.cancel_btn.pack(pady=(4, 0))
 
         # Reset progress bar
         self.progress_bar.set(0)
@@ -519,7 +521,7 @@ class ProgressDialog(ctk.CTkToplevel):
         """Handle cancel button click."""
         if self.on_cancel:
             self.on_cancel()
-        self.cancel_btn.configure(state="disabled", text="Cancelling...")
+        self.cancel_btn.configure(state="disabled", text="Stopping...")
 
     def _on_close_click(self):
         """Handle close button click."""

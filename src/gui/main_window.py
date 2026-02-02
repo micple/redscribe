@@ -180,7 +180,7 @@ class MainWindow(ctk.CTk):
                 BatchStateManager.clear_batch_state()
                 return
 
-            incomplete = sum(1 for f in state.files if f.status.value in ("pending", "failed"))
+            incomplete = sum(1 for f in state.files if f.status.value in ("pending", "failed", "skipped"))
             completed = sum(1 for f in state.files if f.status.value == "completed")
 
             if incomplete == 0:
@@ -226,6 +226,9 @@ class MainWindow(ctk.CTk):
                 "skipped": TranscriptionStatus.SKIPPED,
             }
             media_file.status = status_map.get(file_state.status.value, TranscriptionStatus.PENDING)
+            # Reset SKIPPED files to PENDING for resume
+            if file_state.status.value == "skipped":
+                media_file.status = TranscriptionStatus.PENDING
             if file_state.output_path:
                 media_file.output_path = Path(file_state.output_path)
             media_file.error_message = file_state.error_message
@@ -249,6 +252,9 @@ class MainWindow(ctk.CTk):
         self._update_start_button()
 
         logger.info(f"Resumed batch {state.batch_id} with {len(self.selected_files)} files")
+
+        # Start transcription automatically after resume
+        self.after(100, self._start_transcription)
 
     def _create_widgets(self):
         """Create main window widgets using grid layout.
@@ -1035,6 +1041,10 @@ class MainWindow(ctk.CTk):
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             futures = {}
             for i, file in enumerate(self.selected_files):
+                # Check for cancellation before submitting new futures
+                if self.cancel_event.is_set():
+                    break
+
                 if file.status in (TranscriptionStatus.PENDING, TranscriptionStatus.FAILED):
                     future = executor.submit(
                         self._process_single_file,
@@ -1184,6 +1194,7 @@ class MainWindow(ctk.CTk):
             output_writer=self.output_writer,
             session_logger=self.session_logger,
             event_callback=lambda evt, f, extra: self._on_transcription_event(evt, f, extra, index),
+            cancel_event=self.cancel_event,
         )
         return orchestrator.process_file(
             file=file,

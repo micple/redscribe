@@ -10,6 +10,7 @@ Communicates progress via an event callback (observer pattern),
 keeping this module completely free of GUI dependencies.
 """
 import logging
+import threading
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional
 
@@ -23,6 +24,11 @@ logger = logging.getLogger(__name__)
 
 # Type alias for the event callback signature
 EventCallback = Callable[[str, MediaFile, Dict[str, Any]], None]
+
+
+class CancelledException(Exception):
+    """Raised when a cancel event is detected during processing."""
+    pass
 
 
 class TranscriptionOrchestrator:
@@ -54,6 +60,7 @@ class TranscriptionOrchestrator:
         output_writer: OutputWriter,
         session_logger: SessionLogger,
         event_callback: Optional[EventCallback] = None,
+        cancel_event: Optional["threading.Event"] = None,
     ) -> None:
         """
         Initialize the orchestrator with its dependencies.
@@ -65,12 +72,14 @@ class TranscriptionOrchestrator:
             session_logger: SessionLogger for event/statistics logging.
             event_callback: Optional callback ``(event_type, file, extra_dict)``
                             invoked at each pipeline stage.
+            cancel_event: Optional threading.Event checked before each pipeline step.
         """
         self.converter = converter
         self.transcription_service = transcription_service
         self.output_writer = output_writer
         self.session_logger = session_logger
         self.event_callback = event_callback
+        self.cancel_event = cancel_event
 
     # ------------------------------------------------------------------
     # Public API
@@ -102,6 +111,8 @@ class TranscriptionOrchestrator:
         temp_mp3_path: Optional[Path] = None
 
         try:
+            self._check_cancelled()
+
             # Step 1: Convert video to MP3 if necessary
             if file.is_video:
                 file.status = TranscriptionStatus.CONVERTING
@@ -112,6 +123,8 @@ class TranscriptionOrchestrator:
                 audio_path = temp_mp3_path
             else:
                 audio_path = file.path
+
+            self._check_cancelled()
 
             # Step 2: Transcribe via Deepgram
             file.status = TranscriptionStatus.TRANSCRIBING
@@ -127,6 +140,8 @@ class TranscriptionOrchestrator:
 
             if not result.success:
                 raise Exception(result.error_message or "Transcription failed")
+
+            self._check_cancelled()
 
             # Step 3: Save output
             self._emit("saving", file, {})
@@ -149,6 +164,12 @@ class TranscriptionOrchestrator:
 
             self._emit("completed", file, {"output_path": output_path})
             return True
+
+        except CancelledException:
+            file.status = TranscriptionStatus.SKIPPED
+            file.error_message = "Cancelled by user"
+            self._emit("failed", file, {"error": "Cancelled by user"})
+            return False
 
         except Exception as e:
             file.status = TranscriptionStatus.FAILED
@@ -183,3 +204,8 @@ class TranscriptionOrchestrator:
                 self.event_callback(event_type, file, extra)
             except Exception as exc:
                 logger.debug("Event callback raised: %s", exc)
+
+    def _check_cancelled(self) -> None:
+        """Raise CancelledException if the cancel event is set."""
+        if self.cancel_event is not None and self.cancel_event.is_set():
+            raise CancelledException("Processing cancelled")
